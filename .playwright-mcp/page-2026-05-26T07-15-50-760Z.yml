@@ -1,0 +1,14 @@
+- generic [active] [ref=e1]:
+  - img [ref=e4]
+  - generic [ref=e5]:
+    - img [ref=e6] [cursor=pointer]
+    - img [ref=e7] [cursor=pointer]
+    - generic [ref=e8]:
+      - generic [ref=e9]:
+        - paragraph [ref=e12]: 正在处理资源文件... 请稍候...
+        - paragraph [ref=e13]:
+          - text: HTML5魔塔游戏平台，享受更多魔塔游戏：
+          - text: https://h5mota.com/
+      - img [ref=e14]
+      - paragraph [ref=e15]: 50层魔塔
+    - generic [ref=e30]: 此浏览器不支持HTML5

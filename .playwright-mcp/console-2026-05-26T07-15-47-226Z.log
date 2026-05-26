@@ -1,0 +1,17 @@
+[    2429ms] [LOG] 插件编写测试 @ https://h5mota.com/games/51/project/project.min.js?v=6623:0
+[    2431ms] [LOG] 插件函数转发：core.openShop = core.plugin.openShop @ https://h5mota.com/games/51/main.js:343
+[    2431ms] [LOG] 插件函数转发：core.isShopVisited = core.plugin.isShopVisited @ https://h5mota.com/games/51/main.js:343
+[    2431ms] [LOG] 插件函数转发：core.listShopIds = core.plugin.listShopIds @ https://h5mota.com/games/51/main.js:343
+[    2431ms] [LOG] 插件函数转发：core.canOpenShop = core.plugin.canOpenShop @ https://h5mota.com/games/51/main.js:343
+[    2431ms] [LOG] 插件函数转发：core.setShopVisited = core.plugin.setShopVisited @ https://h5mota.com/games/51/main.js:343
+[    2432ms] [LOG] 插件函数转发：core.canUseQuickShop = core.plugin.canUseQuickShop @ https://h5mota.com/games/51/main.js:343
+[    2432ms] [LOG] 插件函数转发：core.autosaveFromSnapshot = core.plugin.autosaveFromSnapshot @ https://h5mota.com/games/51/main.js:343
+[    2432ms] [LOG] 插件函数转发：core.showAltarSummary = core.plugin.showAltarSummary @ https://h5mota.com/games/51/main.js:343
+[    2432ms] [LOG] 插件函数转发：core.getItemDetail = core.plugin.getItemDetail @ https://h5mota.com/games/51/main.js:343
+[    2432ms] [LOG] 插件函数转发：core.pickOneItemAnimate = core.plugin.pickOneItemAnimate @ https://h5mota.com/games/51/main.js:343
+[    2432ms] [LOG] 插件函数转发：core.clearAttractAnimate = core.plugin.clearAttractAnimate @ https://h5mota.com/games/51/main.js:343
+[    2432ms] [LOG] 插件函数转发：core.auto = core.plugin.auto @ https://h5mota.com/games/51/main.js:343
+[    2432ms] [LOG] 插件函数转发：core.canConnect = core.plugin.canConnect @ https://h5mota.com/games/51/main.js:343
+[    2432ms] [LOG] 插件函数转发：core.floorTofloor = core.plugin.floorTofloor @ https://h5mota.com/games/51/main.js:343
+[    3739ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://h5mota.com/listFile:0
+[    3739ms] [LOG] HTTP 404 @ https://h5mota.com/games/51/main.js:343
