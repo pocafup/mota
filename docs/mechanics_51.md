@@ -721,7 +721,7 @@ core.ui.drawFly(toIndex);
 ```
 gate 1 (仅当 flag:fly = false):
     floorTofloor(toId) 必须为 true
-    → 楼梯路径连通性检查（见 §I.5）
+    → 楼梯路径连通性检查（见 §I.4.2）
 
 gate 2 (始终):
     canFlyFrom[fromId] == true
@@ -732,7 +732,12 @@ gate 2 (始终):
 
 若任一 gate 失败，播放失败音效并显示提示，返回 `false`，路由不记录 token。
 
-**flag:fly**：从游戏源码推断，初始值为 `false`（需楼梯连通），特定事件可设为 `true`（解除连通要求）。具体触发条件见 §J（未确认项 I6）。
+**flag:fly**：初始值为 `false`（需通过 gate1 的楼梯连通检查），特定事件可设为 `true`（解除连通要求）。具体触发条件见 §J（未确认项 J8）。
+
+**gate1 玩家视角**（与玩家实测吻合）：fly魔杖**不要求站在楼梯旁**，只要当前楼层存在一条能到达楼梯格的无阻碍路径即可使用。精确判定（来源：`core.plugin.floorTofloor` + `core.plugin.canConnect`）：
+- 对相邻±1层：`canConnect(英雄当前坐标, 本层楼梯格坐标, 当前层)`= BFS/DFS 可达性（受当前地图状态影响：门/活怪/墙）
+- 对跨多层：递归检查每个中间层的上/下楼梯格之间是否连通
+- 隐藏层（isHide=true）跳过连通检查，直接放行
 
 #### I.3.2 落点规则（flyRecordPosition=false）
 
@@ -975,37 +980,60 @@ if (core.status.event.id == 'action') {
 if (t.indexOf("fly:") == 0)  return "F" + t.substring(4) + ":";  // "fly:MT37" → "FMT37:"
 if (t.indexOf("key:") == 0)  return "K" + t.substring(4);         // "key:49" → "K49"
 if (t.indexOf("item:") == 0) return "I" + _id2number(t.sub(5)) + ":"; // "item:centerFly" → "I{n}:"
-// 其他（changeFloor、stair 等）没有专用分支 → "(changeFloor:MTn)" 通用兜底
-// 但楼梯切层实际上根本不记录到路由（走到楼梯格 = 触发 changeFloor，无需显式记录）
+// 无 "changeFloor:" 专用分支 → 楼梯切层不记录到路由
 ```
 
 Python 解码器对应：`"FMT37:"` → `FLOOR:MT37`；`"K49"` → `UNK:K49`；`"K50"` → `UNK:K50`。
 
-#### 结论：220 条 FLOOR:MTn 全部来自 fly魔杖
+#### 决定性实验：走楼梯不产生 FMTn: token
 
-路由编码函数中，产生 `"FMTn:"` 的**唯一路径**是 `"fly:MTn"` token（由 `core.flyTo` 推入）。  
-楼梯切层没有对应分支，也不会推入 `"fly:MTn"`，因此**走楼梯时楼层切换不记录到路由**——回放时引擎执行英雄踩上楼梯格的 UDLR 动作，changeFloor 自动触发，无需显式 token。
+**实验 1 — FMTn: 精确计数（直接统计 h5route raw string）：**
 
-> ~~"全部 220 次切层事件中，217 次为 changeFloor（走楼梯），3 次为 fly魔杖"~~ ← **此前结论错误，已废除。**
->
-> **正确结论：全部 220 次 FLOOR:MTn token 均为 fly魔杖使用，楼梯切层隐含于 UDLR 动作序列中，不产生独立 token。**
+```
+route_raw 总长度：5188 字符
+FMTn: 出现次数：220   ← 与 floor_transitions 分析的 220 条 FLOOR:MTn 完全吻合
+```
 
-#### floor_transitions.json 分类的根本问题
+出现在 FMTn: 中的楼层：MT1–MT20, MT24–MT26, MT31–MT43, MT45–MT49（共 39 个楼层，各 1–11 次）。
 
-`classify_transition` 的 "type" 字段用于猜测切层原因，但：
-- trigger=None（无非中性前驱 token）→ 误标 `changeFloor` → 实为 **fly魔杖**（飞行前只有 UDLR）
-- trigger=ITEM:50 → 误标 `centerFly` → 实为 **fly魔杖**（ITEM:50 是地面道具拾取，与飞行无关）
-- trigger=UNK:K50/K49 → 误标 `keyboard_fly` → 实为 **fly魔杖**（K50=炸弹/K49=锄头，与飞行无关）
+**从未出现为 FMTn: 的楼层**：MT0, MT21–MT23, MT27–MT30, **MT44**, **MT50**。
 
-3 条具体误标（可从楼层跨度直接验证）：
+**实验 2 — MT50 铁证（走楼梯不产生 FMTn:）：**
 
-| seq | global_idx | 路由 | 楼层跨度 | 原分类 | 正确分类 | 前驱 token 真实含义 |
-|-----|-----------|------|---------|--------|---------|-------------------|
-| 148 | 4368 | MT46→MT37 | 9层 | centerFly | **fly魔杖** | ITEM:50 = 拾取 centerFly 道具 |
-| 151 | 4534 | MT45→MT37 | 8层 | keyboard_fly | **fly魔杖** | UNK:K50 = 炸弹（键'2'） |
-| 177 | 5399 | MT48→MT47 | 1层 | keyboard_fly | **fly魔杖** | UNK:K49 = 锄头（键'1'） |
+- MT50：`canFlyTo=false`，`canFlyFrom=false` → 完全不可飞行，只能走楼梯进入（从 MT49 的上楼梯）
+- 此存档为通关存档，玩家必然到达 MT50（否则无法通关）
+- **FMT50: 出现次数 = 0**
+- 结论：玩家走楼梯到达 MT50，**该楼梯切层不产生任何 FMTn: token**
 
-seq=177 楼层跨度仅 1 层，无法从跨度排除楼梯；但编码规则已确认楼梯不记录 FLOOR token，故 FLOOR:MT47 必为 fly魔杖。
+**实验 3 — 开局段（UDLR 纯序列）：**
+
+路由前 93 个字符（第一个 FMT token 出现前）：
+```
+C1 C1 L2 U2 R2 U6 L1 U5 R2 U4 R1 U4 R1 U6 R1 U7 L10 D9 R3 U3 L4 U1 L2 D5
+R3 U10 L1 D3 R2 U2 L1 D4 R6 U1 C0 L3 D6 R5 U6 L10 D5 R4 U5 R5 D3 L3 D5 R4 L5
+→ FMT4:   （第一次 fly魔杖：直接飞到 MT4）
+```
+完整 token 列表为纯 CHOICE + UDLR，无任何 FMT token。玩家在初始楼层（MT1）探索后直接用 fly魔杖 飞到 MT4，中间无楼梯 token。
+
+#### 最终结论
+
+> ~~"217次为changeFloor（走楼梯），3次为fly魔杖"~~ ← **已废除，来源于错误假设。**
+
+| 类型 | 路由表现 | 本存档计数 |
+|------|---------|-----------|
+| **fly魔杖** | `fly:MTn` → 编码为 `FMTn:` → 解码为 `FLOOR:MTn` | **220 次** |
+| **走楼梯** | 不记录 token，隐含于 UDLR 序列，changeFloor 在回放时自动触发 | 未知（可能为 0 或极少） |
+| **upFly/downFly** | `item:upFly` / `item:downFly` → 编码为 `I{n}:` → 解码为 `ITEM:{n}` | 若有则在 ITEM token 中 |
+
+floor_transitions.json 的 `type` 字段（"changeFloor"/"centerFly"/"keyboard_fly"）**全部错误**：220 条 FLOOR:MTn token 均来自 fly魔杖；"changeFloor" 标签是因为前驱 token 窗口全为 UDLR/CHOICE（无特殊 token），不是楼梯的证据。
+
+#### 3 条具体误标记录（用前驱 token 核实）
+
+| seq | global_idx | 路由 | 原分类（错误） | 正确分类 | 前驱 token 真实含义 |
+|-----|-----------|------|---------------|---------|-------------------|
+| 148 | 4368 | MT46→MT37 | centerFly | **fly魔杖** | ITEM:50 = 地面拾取 centerFly 道具，与飞行无关 |
+| 151 | 4534 | MT45→MT37 | keyboard_fly | **fly魔杖** | UNK:K50 = 炸弹（键'2'），与飞行无关 |
+| 177 | 5399 | MT48→MT47 | keyboard_fly | **fly魔杖** | UNK:K49 = 锄头（键'1'），与飞行无关 |
 
 #### 正确键盘映射（来源：`_encodeRoute_encodeOne`："key:n" → "Kn"；keyCode 49='1', 50='2', 51='3', 52='4'）
 
