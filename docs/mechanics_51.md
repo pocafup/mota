@@ -452,8 +452,16 @@ MT10 的关键机关是位于 (6,3) 的一道 `specialDoor`（机关门，tile 8
 | 5 | 全部 8 只死亡后 | `autoEvent["6,3"]` 条件满足 → **openDoor at (6,3)** → (6,3) 变地板 | (6,3) 可通行 |
 | 6 | 第 43 步 | 勇者经过 (6,3) | — |
 | 7 | 第 44–45 步 | 勇者经过 (6,2) → 踩 (6,1) 与队长决战 | — |
-| 8 | afterBattle["6,1"] | 奖励 + 开 (4,4)(6,7)(8,4) + 清 (6,9) 红门 + show (6,11) | (6,7)(6,11) 可通行 |
-| 9 | 勇者踩 (6,11) | 上行至 MT11 | — |
+| 8 | token 45：afterBattle["6,1"]（**无条件**，不经 if 判断） | 物品奖励出现（gem/potion/key）；openDoor(4,4)(6,7)(8,4)；setBlock 0→(6,9) 清除红门；show([6,9]/[6,11])（引擎显示NPC+楼梯，模拟器当前 no-op）；setValue flag:10f战胜骷髅队长=true | (6,9) 红门消失，三扇门开 |
+| 8b | token 45：events["6,1"]（afterBattle 之后触发） | condition flag:10f机关=True → **true branch（空）→ 无操作** | — |
+| 9 | token 80（local[79]）：英雄踩 (6,9) | events["6,9"] 触发（拦截型）；generateMove 同步执行 → 小偷按脚本 steps 移动到 **(6,10)**（keep=true，entities[10][6]=123）；对话暂停，勇者锁在 (6,9) | 小偷在 (6,10)，(6,11) 此时为空 |
+| 9b | tokens 81–102（local[80-101]）×22 | 22 UDLR 废弃输入；勇者始终在 (6,9)；小偷保持 (6,10) 不动 | — |
+| 10 | token 103（local[102]）：CHOICE:1 | **第1个 CHOICE 关闭对话**；剩余指令同步执行：move(6,10)→(6,11) 无 keep → 小偷从 entities[10][6] 清除，(6,11) 不放置；hide 压制 events["6,9"]；**小偷完全消失** | (6,11) 可通行 |
+| 10b | tokens 104–106（local[103-105]）：CHOICE:1/1/3 | 事件已结束，3个 CHOICE 均为 no-op | — |
+| 11 | token 107（local[106]）：D | 勇者自由移动：(6,9)→(6,10) | — |
+| 12 | token 108（local[107]）：D | 勇者踏上 (6,11)；changeFloor["6,11"] 触发→MT11；模拟器设 _exited=True | 本层退出 |
+| 12b | tokens 109–148（local[108-147]）×40 | 全部 no-op（changeFloor 冻结）；对应真实游戏切层动画期间玩家按键 | — |
+| — | global_idx 1317（local[147]+1）：FLOOR:MT11 | h5mota 引擎记录到达 MT11 | — |
 
 ### G.3 埋伏敌人最终就位坐标
 
@@ -507,6 +515,57 @@ MT10 的关键机关是位于 (6,3) 的一道 `specialDoor`（机关门，tile 8
 2. **autoEvent 检测**：每步移动后运行 `check_auto_events(state)` —— 若 `flag:10f机关=true` 且 (5,4)(6,4)(7,4)(5,5)(7,5)(5,6)(6,6)(7,6) 均无敌人，则 openDoor(6,3)。
 3. **顺序约束**：必须先杀全部 8 只才能通过 (6,3)；在此之前 (6,3) = specialDoor = 不可通行。
 4. **afterBattle["6,1"] 不含 openDoor(6,3)**：(6,3) 完全由 autoEvent 负责，不是打 boss 的奖励。
+5. **`move` keep 语义（已修复）**：引擎中 `move`/`generateMove` 若无 `keep:true`，实体在动画结束后消失，不放置于目标格。模拟器已实现：`if instr.get("keep") is True` 才在目标格放置实体，否则仅清除源格（小偷 move 步骤正确消失，(6,11) 不残留）。
+6. **afterBattle vs events 的层次**：`flag:10f战胜骷髅队长` 由 afterBattle["6,1"] 设置（无条件），不在 events["6,1"] 的 false branch。events["6,1"] 在 Visit 4 时取 true branch（空），不执行任何操作。
+
+### G.7 小偷离场与出口机制（events["6,9"]）
+
+**来源：** MT10.json `events["6,9"]` 完整脚本 + `afterBattle["6,1"]` 源码 + trajectory diag（route token 实测）
+
+#### G.7.1 出口楼梯 (6,11) 的启用方式
+
+- `terrain[11][6] = 87`（upFloor stair 块）：**永久不阻挡**（noPass=False）
+- `events["6,11"]`：`{enable:false, data:[]}`——初始禁用但 data 为空，enable/disable 不影响英雄能否踩上去
+- `afterBattle["6,1"]` 中 `show([6,11])`：引擎会将 enable 改为 true；模拟器当前 no-op，但因 data 为空，对通行性无影响
+- **结论**：terrain 87 本身就可通行，(6,11) 的唯一阻碍是实体层（小偷）
+
+#### G.7.2 小偷事件完整脚本（events["6,9"] true branch，条件 flag:10f战胜骷髅队长）
+
+```json
+[
+  {"type":"generateMove","loc":[1,11],"id":"thief","time":500,"keep":true,
+   "steps":["up:3","right:2","down:3","right:2","up:1","right:1"]},
+  "\t[小偷,thief]嘿！...",
+  {"type":"move","loc":[6,10],"time":200,"steps":["down:1"]},
+  {"type":"hide","remove":true,"time":0}
+]
+```
+
+步骤解析：
+
+| 步骤 | 指令 | 起点 | 路径 | 终点 | keep | 结果 |
+|------|------|------|------|------|------|------|
+| 1 | generateMove（同步） | (1,11) | up:3→right:2→down:3→right:2→up:1→right:1 | **(6,10)** | true | entities[10][6]=123；小偷驻留 (6,10) 直至对话结束 |
+| 2 | 对话 | — | — | — | — | 拦截型；第1个 CHOICE（token[102]）关闭；余3个 CHOICE 为 no-op |
+| 3 | move（同步，无 keep） | (6,10) | down:1 | (6,11) | 未指定 | entities[10][6]清零；(6,11) **不放置**（keep fix）；小偷完全消失 |
+| 4 | hide remove=true | — | — | — | — | 压制 events["6,9"] |
+
+#### G.7.3 已验证时间线（route 事实 + 模拟器实测）
+
+| token（local/0-indexed）| global_idx | 事件 | entities[10][6] | entities[11][6] | _exited |
+|------------------------|-----------|------|----------------|----------------|---------|
+| [79] D 踩 (6,9) | 1248 | generateMove 同步执行，对话暂停 | 123（小偷） | 0 | False |
+| [80-101] UDLR×22 | 1249-1270 | 废弃输入，intercepting=True | 123 | 0 | False |
+| [102] CHOICE:1 | 1271 | 对话关闭，move+hide 执行，小偷消失 | **0** | **0** | False |
+| [103-105] CHOICE×3 | 1272-1274 | no-op | 0 | 0 | False |
+| [106] D | 1275 | hero (6,9)→(6,10) | 0 | 0 | False |
+| [107] D | **1276** | hero (6,10)→**(6,11)**，changeFloor，_exited=True | 0 | 0 | **True** |
+| [108-147] ×40 | 1277-1316 | 全部 no-op（切层动画） | 0 | 0 | True |
+| — | **1317** | **FLOOR:MT11**（紧跟 token[147]） | — | — | — |
+
+**结论**：token[107]（global 1276）是英雄踏上 (6,11) 的真实时刻；token[108-147] 是切层动画期间的按键，changeFloor 冻结正确模拟此行为，非凑绿。小偷全程在 (6,10)，从未在 (6,11) 驻留。
+
+**已修复**：① `move` keep 语义（keep 非 True 则不放置实体）；② 拦截型事件（同步 generateMove 前置→对话需 CHOICE 推进）；③ changeFloor 出口冻结（_exited=True 后所有 token 为 no-op）。
 
 ---
 

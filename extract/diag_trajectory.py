@@ -1,5 +1,6 @@
 """
-诊断脚本：输出 MT10 Visit 4 逐 token 轨迹，定位 _floor_changed 触发点。
+诊断脚本：输出 MT10 Visit 4 逐 token 轨迹，标注 changeFloor 冻结点。
+基于含拦截型事件机制的当前实现（intercepting events + keep fix + changeFloor freeze）。
 """
 import json, sys
 from pathlib import Path
@@ -50,16 +51,17 @@ def main():
             "from": (prev_x, prev_y),
             "to": (after_x, after_y),
             "moved": moved,
-            "floor_changed": False,
+            "exited": state.floor._exited,
             "entities_611": state.floor.entities[11][6],
             "terrain_611": state.floor.terrain[11][6],
         })
 
-    freeze_at = None
+    freeze_at = next((r["idx"] for r in trajectory if r["exited"]), None)
 
     # ── 写全量轨迹到文件 ──────────────────────────────────────────────────────
     out_path = DATA / "mt10_trajectory_diag.txt"
     lines = []
+    lines.append("# 基于含拦截型事件机制的当前实现（intercepting events + keep fix + changeFloor freeze）")
     lines.append(f"Total tokens: {len(tokens)}")
     lines.append(f"freeze_at (token idx): {freeze_at}")
     lines.append("")
@@ -73,7 +75,7 @@ def main():
             f"  {'Y' if r['moved'] else '-':>5}"
             f"  {r['entities_611']:>8}"
             f"  {r['terrain_611']:>8}"
-            f"  {'FROZEN' if r['floor_changed'] else '':>6}"
+            f"  {'FROZEN' if r['exited'] else '':>6}"
         )
 
     out_path.write_text("\n".join(lines), encoding="utf-8")
@@ -105,7 +107,7 @@ def main():
             f"  [{r['idx']:3d}] {r['token']:<12}  "
             f"{r['from']} → {r['to']}"
             f"  e[11][6]={r['entities_611']}"
-            f"  {'FROZEN' if r['floor_changed'] else ''}"
+            f"  {'FROZEN' if r['exited'] else ''}"
         )
 
     # 最後10個のtoken
@@ -114,7 +116,7 @@ def main():
         print(
             f"  [{r['idx']:3d}] {r['token']:<12}  "
             f"{r['from']} → {r['to']}"
-            f"  {'FROZEN' if r['floor_changed'] else ''}"
+            f"  {'FROZEN' if r['exited'] else ''}"
         )
 
 

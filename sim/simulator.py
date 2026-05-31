@@ -70,6 +70,12 @@ class FloorState:
     _id_to_tile: dict       # {entity_id: tile_int}
     _suppressed_events: set  # loc keys where hide+remove fired; also autoEvent once-keys
     _done_after_battle: set  # loc keys where afterBattle already ran
+    # 拦截型事件状态：事件脚本遇到对话后暂停勇者移动，等待 CHOICE token 推进
+    _event_intercepting: bool = False
+    _event_pending_instrs: list = field(default_factory=list)
+    _event_pending_xy: tuple = (0, 0)
+    # 出口状态：英雄踏上 changeFloor 格后，本层不再处理任何 token
+    _exited: bool = False
 
     @property
     def map(self) -> list:
@@ -116,6 +122,10 @@ def _copy_state(state: GameState) -> GameState:
         _id_to_tile=f._id_to_tile,
         _suppressed_events=set(f._suppressed_events),
         _done_after_battle=set(f._done_after_battle),
+        _event_intercepting=f._event_intercepting,
+        _event_pending_instrs=list(f._event_pending_instrs),
+        _event_pending_xy=f._event_pending_xy,
+        _exited=f._exited,
     )
     return GameState(hero=new_hero, floor=new_floor)
 
@@ -180,9 +190,33 @@ def load_floor(path: Path) -> FloorState:
 def step(state: GameState, action: str) -> GameState:
     """Pure function: apply one action token to state, return new state."""
     state = _copy_state(state)
+    floor = state.floor
+
+    # 英雄已离开本层（踏上 changeFloor 格），后续所有 token 均为 no-op
+    if floor._exited:
+        return state
+
+    # 拦截型事件激活：勇者移动被暂停
+    if floor._event_intercepting:
+        if action.startswith("CHOICE"):
+            # CHOICE 推进/关闭对话，执行剩余自动指令
+            remaining = floor._event_pending_instrs
+            ex, ey = floor._event_pending_xy
+            floor._event_intercepting = False
+            floor._event_pending_instrs = []
+            _execute_event_list(state, remaining, ex, ey)
+        # UDLR 等其他 token：勇者被锁，废弃输入
+        _check_auto_events(state)
+        return state
+
     if action in ("U", "D", "L", "R"):
         _process_move(state, action)
-    # CHOICE:n, ITEM:n, FLOOR:x → no-op at the floor level
+        # 英雄踏上 changeFloor 格 → 标记已退出本层
+        loc_key = f"{state.hero.x},{state.hero.y}"
+        if loc_key in floor.change_floor:
+            floor._exited = True
+
+    # CHOICE:n、ITEM:n、FLOOR:x 且无拦截事件 → no-op at the floor level
     _check_auto_events(state)
     return state
 
@@ -360,12 +394,30 @@ def _execute_event_list(
     ctx: dict | None = None,
 ) -> None:
     if ctx is None:
-        ctx = {}
-    for instr in event_list:
+        ctx = {"had_sync_anim": False}
+    floor = state.floor
+    for i, instr in enumerate(event_list):
         if isinstance(instr, str):
-            continue  # dialog text
+            if ctx.get("had_sync_anim"):
+                # 同步动画之后出现对话 → 拦截型事件：暂停执行，等待 CHOICE token
+                floor._event_intercepting = True
+                floor._event_pending_instrs = list(event_list[i + 1:])
+                floor._event_pending_xy = (event_x, event_y)
+                return
+            # 无同步动画前置 → 非拦截型对话，跳过（英雄可继续移动）
+            continue
         if isinstance(instr, dict):
+            t = instr.get("type", "")
+            # 同步的 move/generateMove（无 async:true）→ 进入阻塞式动画上下文
+            if t in ("move", "generateMove") and not instr.get("async", False):
+                ctx["had_sync_anim"] = True
             _execute_instruction(state, instr, event_x, event_y, ctx)
+            if floor._event_intercepting:
+                # 暂停从嵌套分支传播上来；将本层剩余指令追加到 pending
+                outer_rest = list(event_list[i + 1:])
+                if outer_rest:
+                    floor._event_pending_instrs = floor._event_pending_instrs + outer_rest
+                return
 
 
 def _execute_instruction(
@@ -454,7 +506,7 @@ def _execute_instruction(
 
         rows = len(floor.terrain)
         cols = len(floor.terrain[0]) if rows else 0
-        if 0 <= dy < rows and 0 <= dx < cols:
+        if instr.get("keep") is True and 0 <= dy < rows and 0 <= dx < cols:
             floor.entities[dy][dx] = tile_id
         return
 
