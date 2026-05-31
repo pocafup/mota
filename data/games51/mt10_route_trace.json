@@ -1,0 +1,602 @@
+{
+  "_note": "MT10 Visit 4 full token sequence. global_idx = index in full 6360-action list.",
+  "visit_number": 4,
+  "global_start_floor_token": 1168,
+  "global_end_floor_token": 1316,
+  "total_tokens": 148,
+  "move_count": 144,
+  "tokens": [
+    {
+      "global_idx": 1169,
+      "token": "U"
+    },
+    {
+      "global_idx": 1170,
+      "token": "U"
+    },
+    {
+      "global_idx": 1171,
+      "token": "R"
+    },
+    {
+      "global_idx": 1172,
+      "token": "R"
+    },
+    {
+      "global_idx": 1173,
+      "token": "R"
+    },
+    {
+      "global_idx": 1174,
+      "token": "D"
+    },
+    {
+      "global_idx": 1175,
+      "token": "D"
+    },
+    {
+      "global_idx": 1176,
+      "token": "D"
+    },
+    {
+      "global_idx": 1177,
+      "token": "R"
+    },
+    {
+      "global_idx": 1178,
+      "token": "R"
+    },
+    {
+      "global_idx": 1179,
+      "token": "U"
+    },
+    {
+      "global_idx": 1180,
+      "token": "U"
+    },
+    {
+      "global_idx": 1181,
+      "token": "U"
+    },
+    {
+      "global_idx": 1182,
+      "token": "U"
+    },
+    {
+      "global_idx": 1183,
+      "token": "U"
+    },
+    {
+      "global_idx": 1184,
+      "token": "R"
+    },
+    {
+      "global_idx": 1185,
+      "token": "U"
+    },
+    {
+      "global_idx": 1186,
+      "token": "U"
+    },
+    {
+      "global_idx": 1187,
+      "token": "U"
+    },
+    {
+      "global_idx": 1188,
+      "token": "U"
+    },
+    {
+      "global_idx": 1189,
+      "token": "U"
+    },
+    {
+      "global_idx": 1190,
+      "token": "U"
+    },
+    {
+      "global_idx": 1191,
+      "token": "L"
+    },
+    {
+      "global_idx": 1192,
+      "token": "L"
+    },
+    {
+      "global_idx": 1193,
+      "token": "U"
+    },
+    {
+      "global_idx": 1194,
+      "token": "U"
+    },
+    {
+      "global_idx": 1195,
+      "token": "R"
+    },
+    {
+      "global_idx": 1196,
+      "token": "R"
+    },
+    {
+      "global_idx": 1197,
+      "token": "R"
+    },
+    {
+      "global_idx": 1198,
+      "token": "R"
+    },
+    {
+      "global_idx": 1199,
+      "token": "D"
+    },
+    {
+      "global_idx": 1200,
+      "token": "D"
+    },
+    {
+      "global_idx": 1201,
+      "token": "D"
+    },
+    {
+      "global_idx": 1202,
+      "token": "D"
+    },
+    {
+      "global_idx": 1203,
+      "token": "L"
+    },
+    {
+      "global_idx": 1204,
+      "token": "L"
+    },
+    {
+      "global_idx": 1205,
+      "token": "U"
+    },
+    {
+      "global_idx": 1206,
+      "token": "U"
+    },
+    {
+      "global_idx": 1207,
+      "token": "U"
+    },
+    {
+      "global_idx": 1208,
+      "token": "U"
+    },
+    {
+      "global_idx": 1209,
+      "token": "U"
+    },
+    {
+      "global_idx": 1210,
+      "token": "R"
+    },
+    {
+      "global_idx": 1211,
+      "token": "U"
+    },
+    {
+      "global_idx": 1212,
+      "token": "U"
+    },
+    {
+      "global_idx": 1213,
+      "token": "U"
+    },
+    {
+      "global_idx": 1214,
+      "token": "D"
+    },
+    {
+      "global_idx": 1215,
+      "token": "D"
+    },
+    {
+      "global_idx": 1216,
+      "token": "D"
+    },
+    {
+      "global_idx": 1217,
+      "token": "L"
+    },
+    {
+      "global_idx": 1218,
+      "token": "L"
+    },
+    {
+      "global_idx": 1219,
+      "token": "L"
+    },
+    {
+      "global_idx": 1220,
+      "token": "L"
+    },
+    {
+      "global_idx": 1221,
+      "token": "L"
+    },
+    {
+      "global_idx": 1222,
+      "token": "U"
+    },
+    {
+      "global_idx": 1223,
+      "token": "U"
+    },
+    {
+      "global_idx": 1224,
+      "token": "R"
+    },
+    {
+      "global_idx": 1225,
+      "token": "R"
+    },
+    {
+      "global_idx": 1226,
+      "token": "D"
+    },
+    {
+      "global_idx": 1227,
+      "token": "R"
+    },
+    {
+      "global_idx": 1228,
+      "token": "R"
+    },
+    {
+      "global_idx": 1229,
+      "token": "R"
+    },
+    {
+      "global_idx": 1230,
+      "token": "R"
+    },
+    {
+      "global_idx": 1231,
+      "token": "R"
+    },
+    {
+      "global_idx": 1232,
+      "token": "R"
+    },
+    {
+      "global_idx": 1233,
+      "token": "R"
+    },
+    {
+      "global_idx": 1234,
+      "token": "R"
+    },
+    {
+      "global_idx": 1235,
+      "token": "U"
+    },
+    {
+      "global_idx": 1236,
+      "token": "L"
+    },
+    {
+      "global_idx": 1237,
+      "token": "L"
+    },
+    {
+      "global_idx": 1238,
+      "token": "L"
+    },
+    {
+      "global_idx": 1239,
+      "token": "L"
+    },
+    {
+      "global_idx": 1240,
+      "token": "D"
+    },
+    {
+      "global_idx": 1241,
+      "token": "L"
+    },
+    {
+      "global_idx": 1242,
+      "token": "L"
+    },
+    {
+      "global_idx": 1243,
+      "token": "L"
+    },
+    {
+      "global_idx": 1244,
+      "token": "D"
+    },
+    {
+      "global_idx": 1245,
+      "token": "D"
+    },
+    {
+      "global_idx": 1246,
+      "token": "D"
+    },
+    {
+      "global_idx": 1247,
+      "token": "D"
+    },
+    {
+      "global_idx": 1248,
+      "token": "D"
+    },
+    {
+      "global_idx": 1249,
+      "token": "D"
+    },
+    {
+      "global_idx": 1250,
+      "token": "D"
+    },
+    {
+      "global_idx": 1251,
+      "token": "R"
+    },
+    {
+      "global_idx": 1252,
+      "token": "R"
+    },
+    {
+      "global_idx": 1253,
+      "token": "R"
+    },
+    {
+      "global_idx": 1254,
+      "token": "U"
+    },
+    {
+      "global_idx": 1255,
+      "token": "R"
+    },
+    {
+      "global_idx": 1256,
+      "token": "R"
+    },
+    {
+      "global_idx": 1257,
+      "token": "R"
+    },
+    {
+      "global_idx": 1258,
+      "token": "R"
+    },
+    {
+      "global_idx": 1259,
+      "token": "R"
+    },
+    {
+      "global_idx": 1260,
+      "token": "D"
+    },
+    {
+      "global_idx": 1261,
+      "token": "D"
+    },
+    {
+      "global_idx": 1262,
+      "token": "L"
+    },
+    {
+      "global_idx": 1263,
+      "token": "L"
+    },
+    {
+      "global_idx": 1264,
+      "token": "L"
+    },
+    {
+      "global_idx": 1265,
+      "token": "U"
+    },
+    {
+      "global_idx": 1266,
+      "token": "U"
+    },
+    {
+      "global_idx": 1267,
+      "token": "U"
+    },
+    {
+      "global_idx": 1268,
+      "token": "U"
+    },
+    {
+      "global_idx": 1269,
+      "token": "L"
+    },
+    {
+      "global_idx": 1270,
+      "token": "U"
+    },
+    {
+      "global_idx": 1271,
+      "token": "CHOICE:1"
+    },
+    {
+      "global_idx": 1272,
+      "token": "CHOICE:1"
+    },
+    {
+      "global_idx": 1273,
+      "token": "CHOICE:1"
+    },
+    {
+      "global_idx": 1274,
+      "token": "CHOICE:3"
+    },
+    {
+      "global_idx": 1275,
+      "token": "D"
+    },
+    {
+      "global_idx": 1276,
+      "token": "D"
+    },
+    {
+      "global_idx": 1277,
+      "token": "D"
+    },
+    {
+      "global_idx": 1278,
+      "token": "L"
+    },
+    {
+      "global_idx": 1279,
+      "token": "L"
+    },
+    {
+      "global_idx": 1280,
+      "token": "L"
+    },
+    {
+      "global_idx": 1281,
+      "token": "L"
+    },
+    {
+      "global_idx": 1282,
+      "token": "L"
+    },
+    {
+      "global_idx": 1283,
+      "token": "L"
+    },
+    {
+      "global_idx": 1284,
+      "token": "L"
+    },
+    {
+      "global_idx": 1285,
+      "token": "R"
+    },
+    {
+      "global_idx": 1286,
+      "token": "R"
+    },
+    {
+      "global_idx": 1287,
+      "token": "R"
+    },
+    {
+      "global_idx": 1288,
+      "token": "R"
+    },
+    {
+      "global_idx": 1289,
+      "token": "R"
+    },
+    {
+      "global_idx": 1290,
+      "token": "R"
+    },
+    {
+      "global_idx": 1291,
+      "token": "R"
+    },
+    {
+      "global_idx": 1292,
+      "token": "R"
+    },
+    {
+      "global_idx": 1293,
+      "token": "R"
+    },
+    {
+      "global_idx": 1294,
+      "token": "L"
+    },
+    {
+      "global_idx": 1295,
+      "token": "L"
+    },
+    {
+      "global_idx": 1296,
+      "token": "L"
+    },
+    {
+      "global_idx": 1297,
+      "token": "L"
+    },
+    {
+      "global_idx": 1298,
+      "token": "U"
+    },
+    {
+      "global_idx": 1299,
+      "token": "D"
+    },
+    {
+      "global_idx": 1300,
+      "token": "U"
+    },
+    {
+      "global_idx": 1301,
+      "token": "U"
+    },
+    {
+      "global_idx": 1302,
+      "token": "U"
+    },
+    {
+      "global_idx": 1303,
+      "token": "L"
+    },
+    {
+      "global_idx": 1304,
+      "token": "L"
+    },
+    {
+      "global_idx": 1305,
+      "token": "L"
+    },
+    {
+      "global_idx": 1306,
+      "token": "D"
+    },
+    {
+      "global_idx": 1307,
+      "token": "D"
+    },
+    {
+      "global_idx": 1308,
+      "token": "L"
+    },
+    {
+      "global_idx": 1309,
+      "token": "D"
+    },
+    {
+      "global_idx": 1310,
+      "token": "D"
+    },
+    {
+      "global_idx": 1311,
+      "token": "D"
+    },
+    {
+      "global_idx": 1312,
+      "token": "L"
+    },
+    {
+      "global_idx": 1313,
+      "token": "R"
+    },
+    {
+      "global_idx": 1314,
+      "token": "D"
+    },
+    {
+      "global_idx": 1315,
+      "token": "R"
+    },
+    {
+      "global_idx": 1316,
+      "token": "D"
+    }
+  ]
+}

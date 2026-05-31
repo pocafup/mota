@@ -1,0 +1,25 @@
+{
+  "_comment": "来源: core.firstData.hero (live engine)。初始英雄状态（含已装备武器/盾牌的加成）。",
+  "_notes": {
+    "atk_includes_sword5": "ATK=100 已包含 sword5 的 itemEffect(+100)，不需再次应用",
+    "def_includes_shield5": "DEF=100 已包含 shield5 的 itemEffect(+100)，不需再次应用",
+    "mdef": "mdef=0。shield5 的 equip.value.mdef=100 是卸装备系统参数，非初始 mdef",
+    "magic_immune": "flag:魔法免疫=true 由 shield5 pickup 时设置，初始即为 true"
+  },
+  "hp":   1000,
+  "atk":  100,
+  "def":  100,
+  "mdef": 0,
+  "gold": 0,
+  "loc":  {"x": 6, "y": 11, "direction": "down"},
+  "floor": "MT1",
+  "flags": {
+    "nowWeapon": "sword5",
+    "nowShield": "shield5",
+    "魔法免疫": true
+  },
+  "items": {
+    "fly": 1
+  },
+  "_startText_source": "core.firstData.startText: item:fly += 1"
+}

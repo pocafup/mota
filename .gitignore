@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+
+# 临时诊断输出
+*.txt
+!docs/*.md
+
+# Playwright MCP 日志
+.playwright-mcp/
+
+# h5route 存档（原始录像，体积大且含个人数据）
+*.h5route
+
+# 编辑器
+.vscode/
+.idea/
+*.swp

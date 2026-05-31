@@ -1,0 +1,525 @@
+# 50层魔塔 机制规格文档
+
+来源：h5mota.com/games/51  
+提取时间：2026-05-29  
+所有数据均从游戏源码提取，禁止凭空推断。
+
+---
+
+## A. 战斗伤害公式
+
+### A.1 基础战斗流程
+
+确定性，无随机数。每回合：玩家先手（除非怪物有先攻特殊属性）。
+
+**来源**：`core.enemys.enemydata.getDamageInfo` 的完整实现（从运行中引擎通过 `toString()` 取得）。
+
+### A.2 调用链
+
+```
+core.getDamage(enemy, x, y, floorId)
+  → core.enemys.getDamage(id, x, y, floorId)
+    → core.enemys._getDamage(enemy, hero, x, y, floorId)
+      → core.enemys.getDamageInfo(enemy, hero, x, y, floorId)
+        → core.enemys.enemydata.getDamageInfo(enemy, hero, x, y, floorId)
+```
+
+`getDamageInfo` 返回对象 `{mon_hp, mon_atk, mon_def, init_damage, per_damage, hero_per_damage, turn, damage}` 或 `null`（无法击杀）。
+
+### A.3 getEnemyInfo — 怪物属性修正
+
+战斗前先通过 `getEnemyInfo` 修正怪物属性（**来源**：`core.enemys.enemydata.getEnemyInfo`）：
+
+```
+# special 10（模仿）
+if hasSpecial(10): mon_atk = hero_atk; mon_def = hero_def
+
+# special 3（坚固）
+if hasSpecial(3) and mon_def < hero_atk - 1:
+    mon_def = hero_atk - 1
+    → 保证 hero_per_damage = max(0, hero_atk - mon_def) = 1（恰好能打动）
+
+# special 25（光环）：buff 周围敌人 HP/ATK/DEF，百分比叠加
+# special 26（支援）：将相邻同类怪物加入战斗（累加 HP，取最大 ATK/DEF）
+```
+
+### A.4 getDamageInfo — 完整伤害计算
+
+```python
+def get_damage_info(enemy, hero):
+    # 1. 攻击力修正
+    hero_atk = hero.atk
+    if flag_skill == 1:         hero_atk *= 2   # 二倍斩
+    if hasItem('cross') and enemy is zombie/zombieKnight/vampire:  hero_atk *= 2
+    if hasItem('knife') and enemy is magicDragon:  hero_atk *= 2
+
+    # 2. 无敌检查
+    if hasSpecial(20) and not hasItem('cross'):
+        return None  # 无敌，无法击杀
+
+    # 3. 初始伤害
+    init_damage = 0
+
+    # special 11（吸血）
+    if hasSpecial(11):
+        vampire_damage = floor(hero_hp * enemy.value)
+        init_damage += vampire_damage
+        if enemy.add: mon_hp += vampire_damage   # 血量回复
+
+    # 4. 每轮伤害
+    per_damage = mon_atk - hero_def
+    if hasSpecial(2):                            # 魔攻：无视防御
+        per_damage = mon_atk
+    per_damage = max(0, per_damage)
+    if hasSpecial(4):   per_damage *= 2          # 2连击
+    if hasSpecial(5):   per_damage *= 3          # 3连击
+    if hasSpecial(6):   per_damage *= (enemy.n or 4)  # n连击；redSwordsman n=8
+
+    # 5. 反击伤害（每轮）
+    counter_damage = 0
+    if hasSpecial(8):                            # 反击
+        counter_damage = floor((enemy.atkValue or 0.1) * hero_atk)
+
+    # 6. 先手 / 破甲 / 净化
+    if hasSpecial(1):   init_damage += per_damage          # 先攻：多挨一轮
+    if hasSpecial(7):   init_damage += floor((enemy.defValue or 0.9) * hero_def)  # 破甲
+    if hasSpecial(9):   init_damage += floor((enemy.n or 3) * hero_mdef)          # 净化
+
+    # 7. 能否击杀
+    hero_per_damage = max(0, hero_atk - mon_def)
+    if hero_per_damage == 0:
+        return None  # 无法击杀
+
+    # 8. 回合数（含守卫系统）
+    turn = ceil(mon_hp / hero_per_damage)
+    turn += getFlag('__extraTurn__', 0)          # 守卫系统额外回合
+
+    # 9. 总伤害
+    damage = init_damage + (turn - 1) * per_damage + turn * counter_damage
+    damage -= hero_mdef                          # 魔防一次性减免
+    if not flag_enableNegativeDamage:
+        damage = max(0, damage)
+
+    # 10. 附加
+    if hasSpecial(17): damage += getFlag('hatred', 0)  # 仇恨：积累的仇恨值
+    if hasSpecial(22): damage += enemy.damage or 0     # 固伤
+
+    return {mon_hp, mon_atk, mon_def, init_damage, per_damage,
+            hero_per_damage, turn, damage}
+```
+
+**标志**：
+- `flag_enableNegativeDamage = false`（不允许负伤害，data.js 确认）
+- `flag_betweenAttackMax = false`（夹击伤害不取 min，data.js 确认）
+
+### A.5 引擎预言机验证表
+
+英雄属性：ATK=100, DEF=50, HP=10000, mdef=0（除第一组）
+
+| 怪物 ID | 属性（HP/ATK/DEF）| specials | init | per | hero_per | turn | 引擎 damage | 公式 damage | 一致 |
+|---------|-------------------|----------|------|-----|----------|------|-------------|-------------|------|
+| greenSlime | 35/18/1 | 0 | 0 | 8 | 14 | 3 | 16 | (3-1)×8=**16** | ✓ |
+| bat | 35/38/3 | 0 | 0 | 28 | 12 | 3 | 56 | (3-1)×28=**56** | ✓ |
+| skeletonSoldier | 55/52/12 | 0 | 0 | 42 | 3 | 19 | 756 | (19-1)×42=**756** | ✓ |
+| skeleton | 50/42/6 | 0 | 0 | 32 | 9 | 6 | 160 | (6-1)×32=**160** | ✓ |
+| vampire | 444/199/66 | 0 | — | — | 0 | — | null | null（不可击）| ✓ |
+| evilBat | 1000/1/0 | [2,3] | 0 | 1 | 1 | 1000 | 999 | (1000-1)×1=**999** | ✓ |
+| redSwordsman | 100/120/0 | 6(n=8) | 0 | 560 | 100 | 1 | 0 | (1-1)×560=**0** | ✓ |
+| blueKnight | 100/120/0 | 8 | 0 | 70 | 100 | 1 | 10 | 0+1×10=**10** | ✓ |
+
+注：前4组英雄属性为 ATK=15, DEF=10, HP=1000, mdef=0。
+
+*evilBat 特殊验证*：special[2]（魔攻）→ per=mon_atk=1；special[3]（坚固）→ mon_def=hero_atk-1=99 → hero_per=1；turn=1000。  
+*redSwordsman 特殊验证*：per=max(0,120-50)=70；n=8 → per×=8=560；turn=1；damage=(1-1)×560=0（一刀秒杀，无损）。  
+*blueKnight 特殊验证*：counter=floor(0.1×100)=10；turn=1；damage=(1-1)×70+1×10=10。
+
+---
+
+## B. 属性值与比率
+
+### B.1 基础值（data.js `values` 字段，引擎已验证）
+
+```javascript
+lavaDamage:    100   // 每步血网/熔岩地形伤害
+poisonDamage:   10   // 中毒状态每步 HP 损失（精确值待实现确认）
+weakValue:      20   // 衰弱状态 ATK 和 DEF 减少量
+redGem:          1   // 红宝石基础 ATK（× ratio）
+blueGem:         1   // 蓝宝石基础 DEF（× ratio）
+greenGem:        5   // 绿宝石基础 mdef（× ratio）
+redPotion:      50   // 红血瓶基础 HP（× ratio）
+bluePotion:    200   // 蓝血瓶基础 HP（× ratio）
+yellowPotion:  500   // 黄血瓶基础 HP（× ratio）
+greenPotion:   800   // 绿血瓶基础 HP（× ratio）
+breakArmor:    0.9   // 破甲（special 7）系数：init += floor(0.9 × hero_def)
+counterAttack: 0.1   // 反击（special 8）默认系数：counter += floor(0.1 × hero_atk)
+purify:          3   // 净化（special 9）系数：init += floor(3 × hero_mdef)
+hatred:          2   // 仇恨每次击杀积累的仇恨值（special 17 用）
+```
+
+### B.2 比率（ratio）规则
+
+从游戏所有楼层的 `core.floors[floorId].ratio` 提取：
+
+| 楼层范围 | ratio |
+|----------|-------|
+| MT0（大厅）| 0 |
+| MT1–MT10 | 1 |
+| MT11–MT20 | 2 |
+| MT21–MT30 | 3 |
+| MT31–MT40 | 4 |
+| MT41–MT50 | 5 |
+
+**道具拾取 vs 背包使用的区别（来源：items.js + 引擎预言机验证）**：
+
+| 触发方式 | 字段 | 公式 |
+|----------|------|------|
+| 踩格拾取 | `item.itemEffect` | `gain = base_value × thisMap.ratio` |
+| 背包手动使用 | `item.useItemEffect` | `gain = base_value`（无缩放） |
+
+引擎通过 `core.items.getItemEffect()` eval `item.itemEffect`；背包使用 eval `item.useItemEffect`。
+
+**道具拾取公式预言机验证表**（eval `itemEffect` 直接验证，非 getItemEffect）：
+
+| ratio | redGem ATK | blueGem DEF | greenGem MDEF | redPotion HP | bluePotion HP |
+|-------|-----------|------------|--------------|-------------|--------------|
+| 1 (MT1–10)  | +1 | +1 | +5  | +50  | +200  |
+| 2 (MT11–20) | +2 | +2 | +10 | +100 | +400  |
+| 3 (MT21–30) | +3 | +3 | +15 | +150 | +600  |
+| 4 (MT31–40) | +4 | +4 | +20 | +200 | +800  |
+| 5 (MT41–50) | +5 | +5 | +25 | +250 | +1000 |
+
+同理：yellowPotion HP += 500×ratio；greenPotion HP += 800×ratio。
+
+### B.3 超级药水（superPotion，道具 ID = "superPotion"，tile ID = 56）
+
+来源：items.js `superPotion.use` 字段：
+```javascript
+HP += round(0.74 * (atk + def)) * 10
+```
+
+### B.4 道具识别（tile ID → item ID，blocksInfo 完整提取）
+
+路由相关道具（`I<n>:` token 含义）：
+
+| Tile ID | Item ID | 说明 |
+|---------|---------|------|
+| 48 | icePickaxe | 冰镐，打开面前方格的门 |
+| 49 | bomb | 炸弹，消灭周围≤500血目标 |
+| 50 | centerFly | 中心飞行器，瞬移到地图对称位置 |
+| 51 | upFly | 上飞行器，飞到上一层 |
+| 52 | downFly | 下飞行器，飞到下一层 |
+| 55 | cross | 十字架（被动），对不死/吸血鬼双倍攻击，可击杀无敌怪 |
+| 56 | superPotion | 超级药水 |
+| 57 | earthquake | 地震卷，消灭所有可破震目标 |
+| 58 | poisonWine | 解毒酒，清除中毒状态 |
+| 59 | weakWine | 解弱酒，清除衰弱状态 |
+| 60 | curseWine | 解咒酒，清除诅咒状态 |
+
+注：cross 和 amulet 均无 `useItemEffect`（被动道具，无主动使用效果）。  
+注：keys（21-26）、gems（27-30）、potions（31-34）、equipment（35-44）拾取时自动入库，无需 I token。
+
+### B.5 升级系统（击杀计数）
+
+来源：data.js `levelUp` 字段：
+
+| 击杀数 | 效果 |
+|--------|------|
+| 20 | ATK +10, DEF +10 |
+| 40 | 提示"恭喜升级"（无属性加成） |
+
+---
+
+## C. 地形 / 区域伤害
+
+### C.1 地形（来自 updateCheckBlock）
+
+每步触发，不需要战斗：
+
+| 触发条件 | 伤害 | 免疫条件 |
+|----------|------|----------|
+| 踩血网格（lavaNet）| `values.lavaDamage` = 100 | 持有护身符（amulet） |
+
+### C.2 领域伤害（special 15）
+
+触发时机：玩家站在怪物周围格。伤害预存在 `core.status.checkBlock.damage[loc]`，踩格时扣血。
+
+```
+range = enemy.range or 1
+shape = 菱形（曼哈顿距离 ≤ range），若 enemy.zoneSquare=true 则方形
+受影响格：以怪物为中心，range 范围内所有格（不含怪物本格）
+damage[loc] += enemy.value
+免疫：flag:no_zone = true 或 flag:魔法免疫 = true
+```
+
+### C.3 阻击（special 18）
+
+踩进阻击怪物正交相邻格时触发，并可能被推退：
+
+```
+scan_dirs = 正交4方向（若 enemy.zoneSquare=true 则8方向）
+damage[loc] += enemy.value（进入相邻格时扣血）
+同时有 repulse 效果（击退至空格）
+免疫：flag:no_repulse = true 或 flag:魔法免疫 = true
+```
+
+### C.4 夹击（special 16）
+
+玩家处于两个相同 special 16 怪物之间时触发（横向或纵向）：
+
+```
+两怪物 ID 必须相同（getFaceDownId 相同）
+damage = floor((hero_hp - current_damage) / 2)
+若 flags.betweenAttackMax = true：damage = min(floor(hp/2), fight1, fight2)
+（本游戏 betweenAttackMax = false，即取 floor(hp/2)）
+免疫：flag:no_betweenAttack = true 或 flag:魔法免疫 = true
+```
+
+### C.5 激光（special 24）
+
+怪物所在整行 + 整列均为危险格：
+
+```
+damage[整行每格] += enemy.value
+damage[整列每格] += enemy.value
+（怪物本格不加）
+免疫：flag:no_laser = true 或 flag:魔法免疫 = true
+```
+
+### C.6 伏击（special 27）
+
+不扣血，但触发捕捉效果（ambush），详细行为待确认。
+
+---
+
+## D. 商店 / 祭坛
+
+### D.1 系统架构
+
+商店通过 NPC 事件实现，不使用标准 h5mota shop 系统（`core.status.shops` 在本游戏为空）。
+
+### D.2 祭坛公共事件（"商店"，来源：project.min.js）
+
+祭坛 NPC 事件先设 `flag:ratio = <本区ratio值>`，再调用公共事件 `insert:"商店"`。
+
+公共事件 "商店" 结构（while 循环，选"离开"才退出）：
+
+```javascript
+// 每轮重算本次费用
+flag:money1 = 20 + 10 * (flag:times1 + 1) * flag:times1
+
+// 三个购买选项（均需 status:money >= flag:money1）
+HP  +100*(flag:times1+1)  →  status:hp  += 100*(times1+1);  status:money -= money1;  times1 += 1
+ATK +2*flag:ratio         →  status:atk += 2*ratio;         status:money -= money1;  times1 += 1
+DEF +4*flag:ratio         →  status:def += 4*ratio;         status:money -= money1;  times1 += 1
+// 第四个选项：离开（break）
+```
+
+**关键变量**：
+- `flag:times1`：全局购买总次数（HP/ATK/DEF/任意楼层累计），初始=0
+- `flag:ratio`：进入祭坛时设置，等于本层 `thisMap.ratio`
+
+**累计追踪 flag**（用于排行榜）：
+- `${r}区购买hp/atk/def`：各区累计属性增益
+- `${r}区购买hp/atk/def次数`：各区购买次数
+
+### D.3 祭坛位置与收益表（来源：floors.min.js，全部已确认）
+
+| 楼层 | 坐标 | flag:ratio | ATK/次 | DEF/次 |
+|------|------|------------|--------|--------|
+| MT4  | (6,1) | 1 | +2 | +4 |
+| MT12 | (6,9) | 2 | +4 | +8 |
+| **无** | — | **3（MT21-30 无祭坛）** | — | — |
+| MT32 | (10,10) | 4 | +8 | +16 |
+| MT46 | (6,1) | 5 | +10 | +20 |
+
+HP收益（全部祭坛相同）：第 n 次购买（n 从1起）= `100 × n` HP。  
+金币消耗：第 n 次购买 = `20 + 10 × n × (n-1)` 金币（times1 = n-1 时）。
+
+购买序列示例（times1 从0起）：
+
+| 购买次 | times1 | 费用 | HP获得 |
+|--------|--------|------|--------|
+| 1 | 0 | 20 | 100 |
+| 2 | 1 | 40 | 200 |
+| 3 | 2 | 80 | 300 |
+| 4 | 3 | 140 | 400 |
+| 5 | 4 | 220 | 500 |
+
+### D.4 钥匙回收商店（公共事件 "回收钥匙商店"，来源：events.js）
+
+| 出售物品 | 获得金币 |
+|----------|----------|
+| 黄钥匙 × 1 | 10 |
+| 蓝钥匙 × 1 | 50 |
+
+追踪：`flag:黄钥匙出售次数`。  
+进入条件：需先与该 NPC 接触（`isShopVisited` 为 true 后可通过快捷键重复使用）。
+
+---
+
+## E. 路由 Token 格式
+
+### E.1 编码层（.h5route 文件）
+
+```
+外层：LZString.decompressFromBase64(file_content) → JSON
+JSON 字段：{name, version, hard, seed, route}
+内层：LZString.decompressFromBase64(json.route) → RLE 动作字符串
+```
+
+### E.2 RLE 动作字符串 Token 完整对照表
+
+来源：`core.utils.encodeRoute` / `decodeRoute` / `_encodeRoute_encodeOne` / `_decodeRoute_decodeOne` 源码。
+
+| 编码格式 | 解码动作 | 说明 |
+|----------|----------|------|
+| `U[n]` `D[n]` `L[n]` `R[n]` | 移动 n 步（n 省略=1） | up/down/left/right |
+| `C<n>` | `choices:<n>` | 对话选项，0-indexed；本游戏路由共 65 处 |
+| `c` | `choices:none` | 取消选择 |
+| `FMT<n>:` | `fly:MT<n>` | 楼层传送（正常上下楼也用此 token） |
+| `I<n>:` | `item:<number2id(n)>` | 使用道具（n = tile ID） |
+| `S<shopId>:` | `shop:<shopId>` | 进入商店（本游戏路由中无此 token） |
+| `K<n>` | `key:<n>` | 按键，n 为 ASCII 码；本游戏：49='1', 50='2', 52='4' |
+| `(help)` | `help` | 打开游戏说明菜单（触发"游戏说明"公共事件） |
+| `M<x>:<y>` | `move:<x>:<y>` | 直接跳转到坐标 |
+| `T` | `turn` | 转身 |
+| `t<D>:` | `turn:<dir>` | 转向特定方向 |
+| `G` | `getNext` | 触发前方格子 |
+| `p` | `input:none` | 输入框取消 |
+| `P<x>` | `input:<x>` | 输入框输入 x |
+| `Q<x>:` | `input2:<x>` | 输入框输入 x（另一类型） |
+| `N` | `no` | 否 |
+| `u<x>` | `unEquip:<x>` | 卸下装备 |
+| `e<n>:` | `equip:<number2id(n)>` | 装备道具 |
+| `s<x>` | `saveEquip:<x>` | 保存装备方案 |
+| `l<x>` | `loadEquip:<x>` | 加载装备方案 |
+| `X<n>` | `random:<n>` | 随机数选择 |
+
+### E.3 本游戏存档元数据
+
+来源：`51_20260529133740.h5route` 解码：
+
+```json
+{"name": "51", "version": "Ver 3.0", "hard": "", "seed": 1722097160}
+```
+
+- `hard = ""`：未开启 hard 模式（空字符串=关闭）
+- `seed`：随机数种子，1722097160。用途：游戏中随机事件的确定性复现
+- 路由总长：5188 字符原始，6235 个动作（含展开后的移动步）
+- `help` token：2 次（打开游戏说明）
+- `key` token：3 次（按键 '1'、'2'、'4'，均在 MT37-MT48 区域）
+
+### E.4 选项索引确认（C token 0-indexed）
+
+用户确认：`CHOICE:1` = 选第二个选项（即 C[0] = 选项0，C[1] = 选项1）。
+
+---
+
+## F. 后战斗状态效果
+
+来源：`core.events.eventdata.afterBattle` 和 `core.control.controldata.triggerDebuff`（从运行中引擎通过 `toString()` 提取）。
+
+| Special | 名称 | afterBattle 处理 | 效果 |
+|---------|------|-----------------|------|
+| 12 | 中毒 | `triggerDebuff("get","poison")` | `flag.poison = true`；每步损失 `values.poisonDamage`(=10) HP |
+| 13 | 衰弱 | `triggerDebuff("get","weak")` | `flag.weak = true`；`ATK -= 20`，`DEF -= 20`（`values.weakValue`=20） |
+| 14 | 诅咒 | `triggerDebuff("get","curse")` | `flag.curse = true`；无即时属性改变；后续战斗金币和经验归零 |
+| 19 | 自爆 | `hero.hp = 1` | 战斗存活后英雄 HP 直接设为 1（无论当前 HP 多少） |
+
+注：效果仅在英雄存活（HP > damage）时触发。多个 special 可叠加（如同时有 12+13）。
+
+---
+
+## G. MT10 第十层埋伏机制
+
+**来源：** `core.maps['MT10']`（live engine）源码 + `51_20260529133740.h5route` 路线实测  
+**验证时间：** 2026-05-30
+
+### G.1 机制概述
+
+MT10 的关键机关是位于 (6,3) 的一道 `specialDoor`（机关门，tile 85）。该门由事件动态设置，并由 `autoEvent` 在所有埋伏敌人被消灭后自动解开。
+
+**勇者不可能绕过 (6,3)**：从 (6,5) 到 boss 位置 (6,1) 的唯一通道就是 (6,3)，路线存档证实勇者确实经过该格（Visit 4 第 43 步）。
+
+### G.2 完整机制链（来源：route 实测 + 源码验证）
+
+| 步骤 | 触发条件 | 发生事件 | 地图状态变化 |
+|------|----------|----------|-------------|
+| 1 | Visit 4 开始（从 MT1 fly 到 MT10） | 落点 (1,10)（`downFloor=[1,10]`） | 无 |
+| 2 | 第 1–20 步：移动 | 从 (1,10) 经左列→下行走廊→中央列 | 无 |
+| 3 | 第 21 步：踩 (6,5) | `events["6,5"]` 触发（一次性，thereafter removed） | ① 关 (6,7) 门；② 开 (4,4)(8,4)(5,6)(7,6)；③ tile17 清除：(5,4)(6,3)(7,4)(5,5)(7,5)；④ 队长 (6,4)→up:3→(6,1)；⑤ 8只骷髅就位（见§G.3）；⑥ 关 (4,4)(8,4)；⑦ **closeDoor specialDoor at (6,3)**；⑧ `flag:10f机关=true` |
+| 4 | 步骤 22–42（21步） | 勇者击杀全部 8 只骷髅 | 8个位置逐一变 null |
+| 5 | 全部 8 只死亡后 | `autoEvent["6,3"]` 条件满足 → **openDoor at (6,3)** → (6,3) 变地板 | (6,3) 可通行 |
+| 6 | 第 43 步 | 勇者经过 (6,3) | — |
+| 7 | 第 44–45 步 | 勇者经过 (6,2) → 踩 (6,1) 与队长决战 | — |
+| 8 | afterBattle["6,1"] | 奖励 + 开 (4,4)(6,7)(8,4) + 清 (6,9) 红门 + show (6,11) | (6,7)(6,11) 可通行 |
+| 9 | 勇者踩 (6,11) | 上行至 MT11 | — |
+
+### G.3 埋伏敌人最终就位坐标
+
+`events["6,5"]` 执行后 8 只敌人的最终位置（均来自 move/generateMove 指令精确计算）：
+
+| 坐标 | 敌人 | 原始位置 | 移动路径 |
+|------|------|----------|----------|
+| (6,4) | skeletonSoldier | (10,4) | left:4 |
+| (5,4) | skeleton | (1,3) | down:1→right:4 |
+| (7,4) | skeleton | (11,3) | down:1→left:4 |
+| (5,5) | skeleton | (2,3) | down:1→right:3→down:1 |
+| (7,5) | skeleton | (10,3) | down:1→left:3→down:1 |
+| (5,6) | skeleton | (3,3) | down:1→right:2→down:2 |
+| (6,6) | skeletonSoldier | (2,4) | right:3→down:2→right:1 |
+| (7,6) | skeleton | (9,3) | down:1→left:2→down:2 |
+
+### G.4 autoEvent 完整规格
+
+```json
+"autoEvent": {
+  "6,3": {
+    "0": {
+      "condition": "flag:10f机关 && core.getBlockId(5,4) === null && core.getBlockId(6,4) === null && core.getBlockId(7,4) === null && core.getBlockId(5,5) === null && core.getBlockId(7,5) === null && core.getBlockId(5,6) === null && core.getBlockId(6,6) === null && core.getBlockId(7,6) === null",
+      "currentFloor": true,
+      "priority": 0,
+      "delayExecute": false,
+      "multiExecute": false,
+      "data": [{"type": "openDoor"}]
+    },
+    "1": null
+  }
+}
+```
+
+触发逻辑：每步（`checkAutoEvent`）遍历所有 autoEvent 条目；条件为真且 `multiExecute=false` 时执行一次 `openDoor`（无 `loc` 参数 → 默认开当前 autoEvent 键所在格，即 (6,3)）。
+
+### G.5 (6,3) 状态时间线
+
+| 阶段 | (6,3) 的 tile | 可通行？ |
+|------|--------------|---------|
+| 初始地图（进入 MT10 时） | tile 17（`_unknown_visual`） | ✓ 可通行 |
+| events["6,5"] 中 setBlock 0 | 0（地板） | ✓ 可通行 |
+| events["6,5"] 中 closeDoor | 85（specialDoor） | **✗ 不可通行** |
+| autoEvent 条件满足后 openDoor | 0（地板） | ✓ 可通行 |
+
+**结论（route 实测确认）**：勇者的确经过 (6,3)（Visit 4 第 43 步），但这是在 8 只敌人被消灭、autoEvent 开门之后——而非"(6,3) 一直是地板"。
+
+### G.6 模拟器建模要点
+
+1. **动态地图必须**：`events["6,5"]` 触发后地图发生大量状态变化，不能用静态地图模拟 MT10。
+2. **autoEvent 检测**：每步移动后运行 `check_auto_events(state)` —— 若 `flag:10f机关=true` 且 (5,4)(6,4)(7,4)(5,5)(7,5)(5,6)(6,6)(7,6) 均无敌人，则 openDoor(6,3)。
+3. **顺序约束**：必须先杀全部 8 只才能通过 (6,3)；在此之前 (6,3) = specialDoor = 不可通行。
+4. **afterBattle["6,1"] 不含 openDoor(6,3)**：(6,3) 完全由 autoEvent 负责，不是打 boss 的奖励。
+
+---
+
+## H. 未确认项
+
+以下条目标记为**待确认**，禁止在模拟器中假设：
+
+| 编号 | 问题 | 优先级 |
+|------|------|--------|
+| ~~G1~~ | ~~祭坛费用/收益~~ | **已确认**（见 §D.2–D.3） |
+| H2 | Key token K49/50/52（键'1'/'2'/'4'）在 MT37-48 的具体游戏行为 | 中 |
+| ~~H3~~ | ~~Special 14/19 battle 后处理~~ | **已确认**（见 §F） |
+| ~~H4~~ | ~~Tile ID 51 对应的道具 ID~~ | **已确认**：upFly（见 §B.4） |
+| H5 | 护身符（amulet）的获取楼层和条件 | 中 |
+| H6 | 魔法免疫 flag 的设置条件 | 中 |
+| ~~H7~~ | ~~MT10 (6,3) 机关门开放机制~~ | **已确认**（见 §G） |

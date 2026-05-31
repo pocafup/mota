@@ -1,0 +1,135 @@
+{
+  "_comment": "来源: core.floors['MT1'] (live engine)。events/firstArrive/afterGetItem 存原始 h5mota 脚本，不翻译。",
+  "floorId": "MT1",
+  "title": "魔塔 第01层",
+  "width": 13,
+  "height": 13,
+  "ratio": 1,
+  "bgm": "section1.mp3",
+
+  "_map_note": "map[y][x]，0=地板，1=墙。tile ID 含义见 tiles.json。",
+  "map": [
+    [1,1,1,1,1,1,1,1,1,1,1,1,1],
+    [1,87,0,201,202,201,0,0,0,0,0,0,1],
+    [1,1,1,1,1,1,1,1,1,1,1,0,1],
+    [1,31,0,0,81,0,1,27,21,0,1,0,1],
+    [1,0,209,0,1,0,1,28,31,0,1,0,1],
+    [1,1,81,1,1,0,1,1,1,81,1,0,1],
+    [1,21,0,0,1,0,81,205,217,205,1,0,1],
+    [1,0,210,0,1,0,1,1,1,1,1,0,1],
+    [1,1,81,1,1,0,0,0,0,0,0,0,1],
+    [1,0,0,0,1,1,81,1,1,1,81,1,1],
+    [1,31,0,21,1,21,0,127,1,0,205,0,1],
+    [1,31,46,21,1,0,0,0,1,201,32,201,1],
+    [1,1,1,1,1,1,1,1,1,1,1,1,1]
+  ],
+
+  "_map_entities": {
+    "_comment": "从 map 数组推导的实体位置，便于阅读。模拟器从 map + tiles.json 动态解析，不从此字段读取。",
+    "monsters": {
+      "greenSlime(201)": ["(3,1)","(5,1)","(9,11)","(11,11)"],
+      "redSlime(202)":   ["(4,1)"],
+      "bat(205)":        ["(7,6)","(9,6)","(10,10)"],
+      "skeleton(209)":   ["(2,4)"],
+      "skeletonSoldier(210)": ["(2,7)"],
+      "bluePriest(217)": ["(8,6)"]
+    },
+    "items": {
+      "yellowKey(21)":  ["(1,6)","(8,3)","(3,10)","(5,10)","(3,11)"],
+      "redGem(27)":     ["(7,3)"],
+      "blueGem(28)":    ["(7,4)"],
+      "redPotion(31)":  ["(1,3)","(8,4)","(1,10)","(1,11)"],
+      "bluePotion(32)": ["(10,11)"],
+      "fly(46)":        ["(2,11)"]
+    },
+    "doors": {
+      "yellowDoor(81)": ["(4,3)","(2,5)","(9,5)","(6,6)","(2,8)","(6,9)","(10,9)"]
+    },
+    "terrains": {
+      "upFloor(87)": ["(1,1)"]
+    },
+    "npcs": {
+      "king(127)": ["(7,10)"]
+    }
+  },
+
+  "changeFloor": {
+    "1,1": {"floorId":":next","stair":"downFloor","time":0}
+  },
+
+  "_events_comment": "floor.events: 走到/触碰触发的事件（原始 h5mota 脚本）。key = 'x,y'。",
+  "events": {
+    "7,10": {
+      "trigger": null,
+      "enable": false,
+      "noPass": null,
+      "displayDamage": true,
+      "opacity": 1,
+      "filter": {"blur":0,"hue":0,"grayscale":0,"invert":false,"shadow":0},
+      "data": [
+        {
+          "type": "choices",
+          "text": "\t[作者,king]来看看我干了什么吧！自动操作已实装，可以在游戏帮助中打开",
+          "choices": [
+            {"text":"V1.0.0","action":["...(省略版本日志)"]},
+            {"text":"V1.1.0","action":["...(省略)"]},
+            {"text":"V1.2.0","action":["...(省略)"]},
+            {"text":"V1.2.1","action":["...(省略)"]},
+            {"text":"V1.2.2","action":["...(省略)"]},
+            {"text":"V1.2.3","action":["...(省略)"]},
+            {"text":"V1.2.x","action":["...(省略)"]},
+            {"text":"V1.3.x","action":["...(省略)"]},
+            {"text":"V1.4.x","action":["...(省略)"]},
+            {"text":"V1.5.x","action":["...(省略)"]}
+          ]
+        }
+      ],
+      "_sim_note": "enable=false，此 NPC 无行走触发效果，模拟器可忽略"
+    }
+  },
+
+  "_firstArrive_comment": "首次到达该层触发一次（原始 h5mota 脚本）。包含游戏开局设置。",
+  "firstArrive": [
+    {"type":"setValue","name":"item:I333","value":"1"},
+    {"type":"setValue","name":"flag:fly","value":"false"},
+    {"type":"tip","text":"游戏已重启"},
+    {
+      "type": "choices",
+      "text": "\t[作者,king]开启flash特性？...",
+      "choices": [
+        {"text":"开启（特性版）","action":[{"type":"setValue","name":"flag:开启特性","value":"1"}]},
+        {
+          "text":"不开启（纯净版）",
+          "action":[
+            {"type":"setValue","name":"flag:开启特性","value":"0"},
+            {"type":"hide","loc":[[5,5],[6,5],[7,5],[6,6]],"floorId":"MT35","remove":true}
+          ]
+        }
+      ]
+    },
+    {
+      "type": "choices",
+      "text": "\t[作者,king]开启疯狂加血？...",
+      "choices": [
+        {"text":"开启","action":[{"type":"setValue","name":"flag:addhp","value":"1"}]},
+        {"text":"不开启","action":[{"type":"setValue","name":"flag:addhp","value":"0"}]}
+      ]
+    },
+    {"type":"setValue","name":"flag:额外功能开关","value":"true"}
+  ],
+
+  "eachArrive": [],
+  "parallelDo": "",
+
+  "_afterGetItem_comment": "拾取指定位置道具后触发（原始 h5mota 脚本）。key = 'x,y'。",
+  "afterGetItem": {
+    "2,11": [{"type":"setValue","name":"flag:fly","value":"true"}]
+  },
+
+  "afterBattle": {},
+  "afterOpenDoor": {},
+  "cannotMove": {},
+
+  "_lava_tiles": [],
+  "_lava_note": "MT1 无血网地形（tile 5）"
+}

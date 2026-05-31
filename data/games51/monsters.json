@@ -1,0 +1,245 @@
+{
+  "_comment": "来源: core.material.enemys (live engine toString)。special 已归一化为数组。gold 对应引擎字段 money。",
+  "_field_notes": {
+    "def": "JSON 中为 def，Python sim/combat.py 中为 def_（避免保留字）",
+    "special": "[] 表示无特殊属性；单值或多值均为 int 数组",
+    "n": "special 6（n连击）或 special 9（净化倍率）用",
+    "value": "special 11（吸血分数）/ 15（领域每格伤害）/ 18（阻击每格伤害）用",
+    "range": "special 15/18/27 的影响半径",
+    "zoneSquare": "true=方形范围；false/缺省=菱形范围",
+    "atkValue": "special 8（反击）系数，引擎默认 0.1",
+    "defValue": "special 7（破甲）系数，引擎默认 0.9",
+    "add": "special 11（吸血）附加：是否同时回复怪物 HP",
+    "notBomb": "false=可被炸弹杀死（hp<500 时）；true=免疫炸弹"
+  },
+  "greenSlime": {
+    "id": "greenSlime", "name": "绿色史来姆",
+    "hp": 35, "atk": 18, "def": 1, "gold": 1,
+    "special": []
+  },
+  "redSlime": {
+    "id": "redSlime", "name": "红色史来姆",
+    "hp": 45, "atk": 20, "def": 2, "gold": 2,
+    "special": []
+  },
+  "blackSlime": {
+    "id": "blackSlime", "name": "大史来姆",
+    "hp": 130, "atk": 60, "def": 3, "gold": 8,
+    "special": []
+  },
+  "slimelord": {
+    "id": "slimelord", "name": "史来姆王",
+    "hp": 360, "atk": 310, "def": 20, "gold": 40,
+    "special": []
+  },
+  "bat": {
+    "id": "bat", "name": "小蝙蝠",
+    "hp": 35, "atk": 38, "def": 3, "gold": 3,
+    "special": []
+  },
+  "bigBat": {
+    "id": "bigBat", "name": "大蝙蝠",
+    "hp": 60, "atk": 100, "def": 8, "gold": 12,
+    "special": []
+  },
+  "redBat": {
+    "id": "redBat", "name": "吸血蝙蝠",
+    "hp": 200, "atk": 390, "def": 90, "gold": 50,
+    "special": []
+  },
+  "vampire": {
+    "id": "vampire", "name": "吸血鬼",
+    "hp": 444, "atk": 199, "def": 66, "gold": 144,
+    "special": [], "notBomb": false
+  },
+  "skeleton": {
+    "id": "skeleton", "name": "骷髅人",
+    "hp": 50, "atk": 42, "def": 6, "gold": 6,
+    "special": []
+  },
+  "skeletonSoldier": {
+    "id": "skeletonSoldier", "name": "骷髅士兵",
+    "hp": 55, "atk": 52, "def": 12, "gold": 8,
+    "special": []
+  },
+  "skeletonCaptain": {
+    "id": "skeletonCaptain", "name": "骷髅队长",
+    "hp": 100, "atk": 65, "def": 15, "gold": 30,
+    "special": [], "notBomb": false
+  },
+  "ghostSkeleton": {
+    "id": "ghostSkeleton", "name": "鬼战士",
+    "hp": 220, "atk": 180, "def": 30, "gold": 35,
+    "special": []
+  },
+  "zombie": {
+    "id": "zombie", "name": "兽人",
+    "hp": 260, "atk": 85, "def": 5, "gold": 18,
+    "special": []
+  },
+  "zombieKnight": {
+    "id": "zombieKnight", "name": "兽人武士",
+    "hp": 320, "atk": 120, "def": 15, "gold": 30,
+    "special": []
+  },
+  "rock": {
+    "id": "rock", "name": "石头人",
+    "hp": 20, "atk": 100, "def": 68, "gold": 28,
+    "special": []
+  },
+  "slimeMan": {
+    "id": "slimeMan", "name": "幽灵",
+    "hp": 320, "atk": 140, "def": 20, "gold": 30,
+    "special": []
+  },
+  "bluePriest": {
+    "id": "bluePriest", "name": "初级法师",
+    "hp": 60, "atk": 32, "def": 8, "gold": 5,
+    "special": []
+  },
+  "redPriest": {
+    "id": "redPriest", "name": "高级法师",
+    "hp": 100, "atk": 95, "def": 30, "gold": 22,
+    "special": []
+  },
+  "brownWizard": {
+    "id": "brownWizard", "name": "初级巫师",
+    "hp": 220, "atk": 370, "def": 110, "gold": 80,
+    "special": [15], "value": 100, "range": 1
+  },
+  "redWizard": {
+    "id": "redWizard", "name": "高级巫师",
+    "hp": 200, "atk": 380, "def": 130, "gold": 90,
+    "special": [15], "value": 200, "range": 1
+  },
+  "yellowGuard": {
+    "id": "yellowGuard", "name": "初级卫兵",
+    "hp": 50, "atk": 48, "def": 22, "gold": 12,
+    "special": []
+  },
+  "blueGuard": {
+    "id": "blueGuard", "name": "中级卫兵",
+    "hp": 100, "atk": 180, "def": 110, "gold": 50,
+    "special": []
+  },
+  "redGuard": {
+    "id": "redGuard", "name": "高级卫兵",
+    "hp": 180, "atk": 460, "def": 360, "gold": 200,
+    "special": []
+  },
+  "swordsman": {
+    "id": "swordsman", "name": "双手剑士",
+    "hp": 100, "atk": 680, "def": 50, "gold": 55,
+    "special": []
+  },
+  "soldier": {
+    "id": "soldier", "name": "战士",
+    "hp": 210, "atk": 200, "def": 65, "gold": 45,
+    "special": []
+  },
+  "yellowKnight": {
+    "id": "yellowKnight", "name": "骑士队长",
+    "hp": 120, "atk": 150, "def": 50, "gold": 100,
+    "special": [], "notBomb": false
+  },
+  "redKnight": {
+    "id": "redKnight", "name": "骑士",
+    "hp": 160, "atk": 230, "def": 105, "gold": 65,
+    "special": []
+  },
+  "darkKnight": {
+    "id": "darkKnight", "name": "黑暗骑士",
+    "hp": 180, "atk": 430, "def": 210, "gold": 120,
+    "special": []
+  },
+  "blackKing": {
+    "id": "blackKing", "name": "黑衣魔王",
+    "hp": 1000, "atk": 500, "def": 0, "gold": 1000,
+    "special": []
+  },
+  "blueKnight": {
+    "id": "blueKnight", "name": "蓝骑士",
+    "hp": 100, "atk": 120, "def": 0, "gold": 9,
+    "special": [8]
+  },
+  "poisonBat": {
+    "id": "poisonBat", "name": "紫蝙蝠",
+    "hp": 100, "atk": 120, "def": 0, "gold": 14,
+    "special": [13]
+  },
+  "steelRock": {
+    "id": "steelRock", "name": "高级石头人",
+    "hp": 40, "atk": 400, "def": 315, "gold": 0,
+    "special": []
+  },
+  "skeletonPriest": {
+    "id": "skeletonPriest", "name": "骷髅法师",
+    "hp": 100, "atk": 100, "def": 0, "gold": 0,
+    "special": [18], "value": 20
+  },
+  "badHero": {
+    "id": "badHero", "name": "勇士",
+    "hp": 600, "atk": 10, "def": 10, "gold": 0,
+    "special": []
+  },
+  "redKing": {
+    "id": "redKing", "name": "魔王",
+    "hp": 8000, "atk": 5000, "def": 1000, "gold": 500,
+    "special": [], "notBomb": false
+  },
+  "whiteKing": {
+    "id": "whiteKing", "name": "魔法警卫",
+    "hp": 230, "atk": 450, "def": 100, "gold": 100,
+    "special": [16]
+  },
+  "blackMagician": {
+    "id": "blackMagician", "name": "大法师",
+    "hp": 4500, "atk": 560, "def": 310, "gold": 1000,
+    "special": [], "notBomb": false
+  },
+  "silverSlime": {
+    "id": "silverSlime", "name": "银头怪",
+    "hp": 100, "atk": 120, "def": 0, "gold": 15,
+    "special": [14]
+  },
+  "swordEmperor": {
+    "id": "swordEmperor", "name": "剑圣",
+    "hp": 5000, "atk": 1580, "def": 190, "gold": 500,
+    "special": [], "notBomb": false
+  },
+  "redSwordsman": {
+    "id": "redSwordsman", "name": "剑王",
+    "hp": 100, "atk": 120, "def": 0, "gold": 7,
+    "special": [6], "n": 8
+  },
+  "poisonZombie": {
+    "id": "poisonZombie", "name": "绿兽人",
+    "hp": 100, "atk": 120, "def": 0, "gold": 13,
+    "special": [12]
+  },
+  "magicDragon": {
+    "id": "magicDragon", "name": "魔龙",
+    "hp": 1500, "atk": 600, "def": 250, "gold": 800,
+    "special": [], "notBomb": false
+  },
+  "octopus": {
+    "id": "octopus", "name": "大乌贼",
+    "hp": 1200, "atk": 180, "def": 20, "gold": 100,
+    "special": [], "notBomb": false
+  },
+  "evilBat": {
+    "id": "evilBat", "name": "邪恶蝙蝠",
+    "hp": 1000, "atk": 1, "def": 0, "gold": 0,
+    "special": [2, 3]
+  },
+  "redWizardRepulse": {
+    "id": "redWizardRepulse", "name": "高级巫师（阻击）",
+    "hp": 200, "atk": 380, "def": 130, "gold": 90,
+    "special": [18], "value": 200, "range": 1
+  },
+  "steelGuard": {
+    "id": "steelGuard", "name": "铁守卫",
+    "hp": 0, "atk": 0, "def": 0, "gold": 0,
+    "special": [18], "value": 20
+  }
+}

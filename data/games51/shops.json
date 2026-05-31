@@ -1,0 +1,60 @@
+{
+  "_comment": "来源: project.min.js 公共事件 '商店' + floors.min.js 各楼层祭坛事件。",
+  "_altar_system": {
+    "event_name": "商店",
+    "trigger_pattern": "floor.events[pos] = [setValue flag:ratio=N, insert '商店']",
+    "cost_formula": "20 + 10 * (times1 + 1) * times1",
+    "cost_formula_note": "times1 = 全局已购次数（初始=0，所有祭坛/所有属性累计）",
+    "cost_sequence": [20, 40, 80, 140, 220, 320, 440, 580, 740, 920],
+    "hp_gain_formula": "100 * (times1 + 1)",
+    "hp_gain_note": "随全局购买次数递增；第1次+100，第2次+200，...",
+    "atk_gain_formula": "2 * floor_ratio",
+    "def_gain_formula": "4 * floor_ratio",
+    "floor_ratio_set": "altar_event 先 setValue flag:ratio=N 再 insert '商店'"
+  },
+  "altars": [
+    {
+      "floor": "MT4",
+      "pos": "6,1",
+      "ratio": 1,
+      "atk_per_purchase": 2,
+      "def_per_purchase": 4
+    },
+    {
+      "floor": "MT12",
+      "pos": "6,9",
+      "ratio": 2,
+      "atk_per_purchase": 4,
+      "def_per_purchase": 8
+    },
+    {
+      "_note": "MT21-MT30（ratio=3）无祭坛。已扫描全部 ratio:3 楼层，events 均为空。",
+      "floor": null,
+      "ratio": 3,
+      "atk_per_purchase": null,
+      "def_per_purchase": null
+    },
+    {
+      "floor": "MT32",
+      "pos": "10,10",
+      "ratio": 4,
+      "atk_per_purchase": 8,
+      "def_per_purchase": 16
+    },
+    {
+      "floor": "MT46",
+      "pos": "6,1",
+      "ratio": 5,
+      "atk_per_purchase": 10,
+      "def_per_purchase": 20
+    }
+  ],
+  "key_recycling": {
+    "_source": "floors.min.js MT28 (8,4) 事件 + MT12 (11,1) 事件",
+    "items": [
+      {"floor": "MT28", "pos": "8,4", "sell": "yellowKey", "gain_gold": 100},
+      {"floor": "MT12", "pos": "11,1", "buy": "yellowKey",  "cost_gold": 1000,
+       "_note": "条件：switch:A=true（由事件触发解锁）"}
+    ]
+  }
+}
