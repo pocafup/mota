@@ -677,16 +677,281 @@ MT3 伏击 5 条对话均为 `\t[name]text` 格式，无 `choices` 索引，无 
 
 ---
 
-## I. 未确认项
+## I. 飞行系统
+
+**来源**：h5mota 引擎 `core.flyTo`、`core.plugin.floorTofloor`、`core.hasVisitedFloor`、各道具 `useItemEffect`（均通过浏览器 `toString()` 从运行中引擎取得）。
+
+### I.1 三种飞行道具概览
+
+| 道具 ID | 名称 | 触发方式 | 效果 | 路由 token |
+|---------|------|----------|------|-----------|
+| `fly` | 魔杖 | 物品栏使用 | 全塔楼层选择界面，调用 `core.flyTo(toId)` | `fly:MTn` |
+| `centerFly` | 瞬移 | 物品栏使用（或快捷键 K51/键'3'） | 当前层对称格传送 | 无（不切层） |
+| `upFly` | 上飞翼 | 物品栏使用（或快捷键 K52/键'4'） | 切至当前层 +1 层 | 无（含于 changeFloor 流程） |
+| `downFly` | 下飞翼 | 同上 | 切至当前层 -1 层 | 无（含于 changeFloor 流程） |
+
+**关键结论**：路由中所有 `fly:MTn` token 均由 fly魔杖调用 `core.flyTo` 产生。centerFly/upFly/downFly 不产生 `fly:MTn`，无法与 fly魔杖切层事件区分（route 重放时 fly: replay handler 必须持有 fly魔杖才能执行）。
+
+---
+
+### I.2 fly魔杖（item:fly）
+
+`useItemEffect`（源码）：
+```javascript
+core.ui.drawFly(core.floorIds.indexOf(core.status.floorId));
+```
+打开楼层选择 UI。用户选定目标楼层后，UI 内部调用 `core.flyTo(toId)` 并将结果 `fly:toId` 压入路由。
+
+**重放入口**（route replay handler）：
+```javascript
+if (action.indexOf("fly:") != 0) return false;
+var floorId = action.substring(4);
+if (!core.canUseItem("fly")) return false;  // 重放时必须持有 fly 道具
+core.ui.drawFly(toIndex);
+// → 内部调用 core.flyTo(floorId, core.replay)
+```
+结论：重放 `fly:MTn` token 时，模拟器须确认英雄持有 fly 道具，否则无效。
+
+---
+
+### I.3 核心函数：core.flyTo
+
+#### I.3.1 条件检查顺序
+
+```
+gate 1 (仅当 flag:fly = false):
+    floorTofloor(toId) 必须为 true
+    → 楼梯路径连通性检查（见 §I.5）
+
+gate 2 (始终):
+    canFlyFrom[fromId] == true
+    canFlyTo[toId]     == true
+    hasVisitedFloor(toId) == true
+    → 三者均满足才允许飞行
+```
+
+若任一 gate 失败，播放失败音效并显示提示，返回 `false`，路由不记录 token。
+
+**flag:fly**：从游戏源码推断，初始值为 `false`（需楼梯连通），特定事件可设为 `true`（解除连通要求）。具体触发条件见 §J（未确认项 I6）。
+
+#### I.3.2 落点规则（flyRecordPosition=false）
+
+`flyRecordPosition=false`（此塔设置），英雄不记忆出发格，而是降落在目标层的楼梯坐标：
+
+```
+fromIndex = floorIds.indexOf(fromId)
+toIndex   = floorIds.indexOf(toId)
+
+if fromIndex ≤ toIndex:   # 向上飞（或同层）
+    stair = "downFloor"   # 降落在目标层的"下楼梯"坐标
+else:                      # 向下飞
+    stair = "upFloor"     # 降落在目标层的"上楼梯"坐标
+```
+
+特殊：若目标层设有 `flyPoint` 字段，则降落在 `flyPoint` 坐标（优先于上述规则）。
+
+#### I.3.3 路由 token
+
+`core.status.route.push("fly:" + toId)`，toId 为 `"MT1"`–`"MT50"` 等楼层 ID。
+编码进 .h5route 时显示为 `FMTn:`（见 §E）。
+
+---
+
+### I.4 可飞性条件
+
+#### I.4.1 hasVisitedFloor 算法
+
+```javascript
+// 引擎实现（h5mota engine core.hasVisitedFloor）
+function(floorId) {
+  if (!core.hasFlag("__visited__")) core.setFlag("__visited__", {});
+  if (core.status.maps[floorId].isHide) {
+    return core.getFlag("__visited__")[floorId];  // 隐藏层：必须显式访问
+  }
+  // 非隐藏层：若 floorIds 数组中任意更高索引的楼层已访问，则视为"已访问"
+  for (var i = core.floorIds.length - 1; i >= 0; i--) {
+    if (floorId === core.floorIds[i]) return core.getFlag("__visited__")[floorId];
+    if (core.getFlag("__visited__")[core.floorIds[i]]) return true;
+  }
+}
+```
+
+**推论**：
+- 非隐藏楼层（isHide=false）：只要访问过任何比目标楼层编号更高的楼层，目标楼层自动视为"已访问"。即到达 MT30 后，MT1–MT29 均可作为 fly 目标。
+- 隐藏楼层（isHide=true，本塔仅 MT44）：必须实际进入过才视为"已访问"。
+
+**模拟器实现要点**：状态须维护 `visited_floors: set[str]`，每次 changeFloor 进入新楼层时加入该集合。
+
+#### I.4.2 floorTofloor 楼梯连通性检查（gate 1）
+
+当 `flag:fly=false` 时，飞行前检查从当前层到目标层的楼梯路径是否连通：
+
+```
+function floorTofloor(toId):
+    fromIndex = indexOf(fromId)
+    toIndex   = indexOf(toId)
+
+    # 隐藏层直接放行
+    if main.floors[toId].isHide: return true
+
+    # 同层：检查 downFloor 格是否可直接移动到达
+    if toId == fromId:
+        return canMoveDirectly(downFloor[0], downFloor[1]) != -1
+
+    # 相邻一层（差 1）：
+    if abs(toIndex - fromIndex) == 1:
+        if fromIndex in {0, 44}: return true   # 边界特例
+        if toIndex > fromIndex:
+            return canConnect(hero.x, hero.y, upFloor[0], upFloor[1], fromId)
+        else:
+            return canConnect(hero.x, hero.y, downFloor[0], downFloor[1], fromId)
+
+    # 跨多层：递归检查中间层的上下楼梯是否连通
+    if toIndex > fromIndex:
+        prevFloorId = floorIds[toIndex - 1]
+        if isHide[prevFloorId]: return floorTofloor(prevFloorId)  # 隐藏层跳过
+        return canConnect(upFloor_prev[0], upFloor_prev[1],
+                          downFloor_prev[0], downFloor_prev[1], prevFloorId) \
+               and floorTofloor(prevFloorId)
+    else:  # toIndex < fromIndex
+        nextFloorId = floorIds[toIndex + 1]
+        if isHide[nextFloorId]: return floorTofloor(nextFloorId)
+        return canConnect(upFloor_next[0], upFloor_next[1],
+                          downFloor_next[0], downFloor_next[1], nextFloorId) \
+               and floorTofloor(nextFloorId)
+```
+
+`canConnect(x1,y1, x2,y2, floorId)` = BFS/DFS 同层可达性（考虑当前地图状态的门/怪/墙）。
+
+**实现警告**：此检查依赖当前地图状态（机关门开闭），因此是动态的。若地图状态改变，结果可能变化。
+
+---
+
+### I.5 各楼层飞行属性
+
+#### I.5.1 canFlyTo / canFlyFrom / isHide（来源：浏览器引擎，全塔枚举）
+
+| 楼层 | canFlyTo | canFlyFrom | isHide | 备注 |
+|------|---------|-----------|--------|------|
+| MT0  | **false** | true | false | 不可作为飞行目的地（地下） |
+| MT1–MT43 | true | true | false | 普通楼层，正常可飞 |
+| MT44 | **false** | true | **true** | 隐藏层；仅能从 MT45(1,1) 走楼梯进入；可飞出但不可飞入 |
+| MT45–MT49 | true | true | false | 普通楼层，正常可飞 |
+| MT50 | **false** | **false** | false | 顶层；既不可飞入也不可飞出 |
+
+**特殊楼层小结**：
+- **MT0**：不可飞入；若需进入，只能从 MT1 走楼梯。
+- **MT44**（隐藏层）：不可飞入；只能从 MT45 的下楼梯 (1,1) 步行进入；进入后记录 `__visited__[MT44]`，之后可用 fly魔杖飞出（canFlyFrom=true）。退出方式：回走楼梯至 MT45 或 fly魔杖飞出。
+- **MT50**：顶层；完全不可飞，须走楼梯 MT49→MT50。
+
+#### I.5.2 upFloor / downFloor 落点坐标（来源：浏览器引擎，部分已确认）
+
+落点坐标含义：飞行时的降落格（见 §I.3.2）。格式 `[x, y]`（同 `map[y][x]` 坐标系）。
+
+| 楼层 | downFloor（向上飞时降落） | upFloor（向下飞时降落） |
+|------|--------------------------|------------------------|
+| MT10 | [1, 10] | [6, 10] |
+| MT44 | null | null |
+| MT45 | [2, 1] | [10, 1] |
+| MT46 | [11, 2] | [11, 10] |
+| MT47 | [11, 10] | [2, 1] |
+| MT48 | [11, 10] | [1, 10] |
+| MT49 | [2, 11] | null |
+
+注：MT1–MT9、MT11–MT43 的 upFloor/downFloor 待完整楼层提取后补充（须运行 gen_floors.py 扩展范围）。
+
+---
+
+### I.6 centerFly（瞬移，item:centerFly）
+
+`useItemEffect`（源码）：
+```javascript
+core.clearMap('hero');
+core.setHeroLoc('x', core.bigmap.width  - 1 - core.getHeroLoc('x'));
+core.setHeroLoc('y', core.bigmap.height - 1 - core.getHeroLoc('y'));
+core.drawHero();
+core.setFlag('talking', 0);
+core.drawTip(core.material.items[itemId].name + '使用成功');
+```
+
+**传送公式**（此塔地图 13×13，bigmap.width = bigmap.height = 13）：
+```
+新x = 12 - 旧x
+新y = 12 - 旧y
+```
+即关于地图中心 (6,6) 的点对称。
+
+**特性**：
+- 不切换楼层，不产生任何 FLOOR token。
+- 不检查目标格是否可走（源码直接 setHeroLoc，无碰撞检测）。
+- 不消耗道具（无 `removeItem` 调用；本塔中 centerFly 应属于可反复使用道具——待确认）。
+- 路由 token：对应 route 中的 `ITEM:50`（ITEM:50 = centerFly 道具 tile ID 的拾取记录，不是使用记录）。使用时仅产生 `C`（CHOICE）token，不产生专属 token。
+
+---
+
+### I.7 upFly / downFly（±1层飞翼）
+
+`upFly useItemEffect`（源码）：
+```javascript
+var floorId = core.floorIds[core.floorIds.indexOf(core.status.floorId) + 1];
+if (core.status.event.id == 'action') {
+    core.insertAction([
+        {"type": "changeFloor", "loc": [x, y], "floorId": floorId},
+        {"type": "tip", "text": "上飞翼使用成功"}
+    ]);
+} else {
+    core.changeFloor(floorId, null, core.status.hero.loc, null, function() {
+        core.drawTip('上飞翼使用成功');
+        core.replay();
+    });
+}
+```
+`downFly` 同理，改为 `currentIndex - 1`。
+
+**传送规则**：
+- 目标层 = 当前层在 floorIds 数组中的下标 ±1 对应的楼层 ID。
+- 降落坐标 = **当前英雄位置**（`core.status.hero.loc`），不使用 upFloor/downFloor 字段。
+- **完全绕过 `core.flyTo`**：不检查 canFlyTo、canFlyFrom、hasVisitedFloor、floorTofloor。
+- 不产生 `fly:MTn` 路由 token；切层事件在 route 中表现为普通 UDLR 走楼梯或 changeFloor。
+
+---
+
+### I.8 路由核对：floor_transitions.json 分类修正
+
+`extract/analyze_floor_transitions.py` 对以下 3 次切层的分类**有误**，原因是错误假设了 K49/K50 和 ITEM:50 的含义：
+
+| seq | global_idx | 路由 | 原分类（错误） | 实际 | 说明 |
+|-----|-----------|------|---------------|------|------|
+| 148 | 4368 | MT46→MT37 | centerFly | **fly魔杖** | 窗口内 ITEM:50 是 centerFly 道具的地面拾取，与飞行无关 |
+| 151 | 4534 | MT45→MT37 | keyboard_fly | **fly魔杖** | 窗口内 UNK:K50 是炸弹（键'2'），不是飞行快捷键 |
+| 177 | 5399 | MT48→MT47 | keyboard_fly | **fly魔杖** | 窗口内 UNK:K49 是锄头（键'1'），不是飞行快捷键 |
+
+**正确结论**：全部 220 次切层事件中，217 次为 `changeFloor`（走楼梯），3 次为 fly魔杖调用 `core.flyTo` 产生的 `fly:MTn` token。
+
+**analyze_floor_transitions.py 中的错误假设**：
+```python
+FLY_ITEM_IDS = {"50"}       # 错：ITEM:50 = centerFly 道具拾取，不是飞行触发
+KB_FLY_TOKENS = {"UNK:K49", "UNK:K50", "UNK:K52"}  # 错：K49=锄头 K50=炸弹 K52=上下飞翼列表
+```
+正确键盘映射（来源：items.json + 引擎 keyboard 配置）：
+- K49（键'1'）= 锄头（pickaxe）
+- K50（键'2'）= 炸弹（bomb/hammer）
+- K51（键'3'）= centerFly（瞬移）
+- K52（键'4'）= upFly/downFly 列表
+
+---
+
+## J. 未确认项
 
 以下条目标记为**待确认**，禁止在模拟器中假设：
 
 | 编号 | 问题 | 优先级 |
 |------|------|--------|
 | ~~G1~~ | ~~祭坛费用/收益~~ | **已确认**（见 §D.2–D.3） |
-| I2 | Key token K49/50/52（键'1'/'2'/'4'）在 MT37-48 的具体游戏行为 | 中 |
+| ~~I2~~ | ~~Key token K49/50/52（键'1'/'2'/'4'）在 MT37-48 的具体游戏行为~~ | **已确认**（见 §I.8：K49=锄头、K50=炸弹、K51=centerFly、K52=上下飞翼列表） |
 | ~~I3~~ | ~~Special 14/19 battle 后处理~~ | **已确认**（见 §F） |
 | ~~I4~~ | ~~Tile ID 51 对应的道具 ID~~ | **已确认**：upFly（见 §B.4） |
-| I5 | 护身符（amulet）的获取楼层和条件 | 中 |
-| I6 | 魔法免疫 flag 的设置条件（MT3 伏击已确认为移除路径之一，见 §H） | 中 |
+| J5 | 护身符（amulet）的获取楼层和条件 | 中 |
+| J6 | 魔法免疫 flag 的设置条件（MT3 伏击已确认为移除路径之一，见 §H） | 中 |
 | ~~I7~~ | ~~MT10 (6,3) 机关门开放机制~~ | **已确认**（见 §G） |
+| J8 | flag:fly 设置条件（fly魔杖飞行连通性检查的开关，见 §I.3.1） | 高 |
