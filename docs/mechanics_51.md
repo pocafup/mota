@@ -881,11 +881,61 @@ core.drawTip(core.material.items[itemId].name + '使用成功');
 ```
 即关于地图中心 (6,6) 的点对称。
 
-**特性**：
+#### 使用前校验（canUseItemEffect）
+
+centerFly **在传送前执行碰撞检测**。完整源码：
+
+```javascript
+// core.material.items['centerFly'].canUseItemEffect（从运行中引擎取得）
+(function () {
+    var toX = core.bigmap.width  - 1 - core.getHeroLoc('x'),
+        toY = core.bigmap.height - 1 - core.getHeroLoc('y');
+    var id = core.getBlockId(toX, toY);
+    return id === null || id === 'none' || id === 'airwall';
+})();
+```
+
+调用链：
+```
+canUseItemEffect
+  → core.getBlockId(toX, toY)
+      → core.maps.getBlock(x, y, floorId, false)
+          → blockObjs[x+","+y]  （false = 不含 disabled block）
+      → block == null ? null : block.event.id
+```
+
+`_mapIntoBlocks` 将所有 `block.id ≠ 0` 的 tile 装入 blockObjs。各 event.id 对应规则：
+
+| 目标格情况 | event.id | canUseItemEffect 返回 | 结果 |
+|-----------|---------|----------------------|------|
+| 空地板（tile 0，无 trigger）| 不入 blockObjs → null | `null === null` → **true** | **可传送** |
+| 装饰地板（tile 18/19/66-80等）| "none" | `id === 'none'` → **true** | **可传送** |
+| 透明墙 airwall（tile 17）| "airwall" | `id === 'airwall'` → **true** | **可传送** |
+| 普通墙（tile 1）| "yellowWall" | false | **被拦截** |
+| fakeWall（tile 2/3）| "fakeWall"/"fakeWall2" | false | **被拦截** |
+| 怪物 | 怪物 ID | false | **被拦截** |
+| 门 | 门 ID | false | **被拦截** |
+| 地面道具 | 道具 ID | false | **被拦截** |
+| 已击败怪物（disabled）| `getBlock` 返回 null → null | **true** | **可传送** |
+
+**来源**：`core.items.canUseItem.toString()`（通过浏览器引擎取得）：
+```javascript
+function(itemId) {
+    if (!core.hasItem(itemId)) return false;
+    var canUseItemEffect = core.material.items[itemId].canUseItemEffect;
+    if (canUseItemEffect) {
+        try { return eval(canUseItemEffect) } catch(e) { main.log(e); return false }
+    }
+}
+```
+若 `canUseItemEffect` 返回 false，`useItem` 立即 return，不执行 `useItemEffect`（即不传送、不播放音效）。
+
+**与玩家实测一致**：对称格有墙/怪/门/道具 → 必定被拦截，无法传送。
+
+**其他特性**：
 - 不切换楼层，不产生任何 FLOOR token。
-- 不检查目标格是否可走（源码直接 setHeroLoc，无碰撞检测）。
-- 不消耗道具（无 `removeItem` 调用；本塔中 centerFly 应属于可反复使用道具——待确认）。
-- 路由 token：对应 route 中的 `ITEM:50`（ITEM:50 = centerFly 道具 tile ID 的拾取记录，不是使用记录）。使用时仅产生 `C`（CHOICE）token，不产生专属 token。
+- 路由 token：`useItem` 记录 `"item:centerFly"` → 编码为 `I{num}:` → 解码为 `ITEM:{num}`。
+- 不消耗道具（`useItemEffect` 无 `removeItem` 调用；本塔中可反复使用——待确认次数上限）。
 
 ---
 
@@ -912,32 +962,59 @@ if (core.status.event.id == 'action') {
 - 目标层 = 当前层在 floorIds 数组中的下标 ±1 对应的楼层 ID。
 - 降落坐标 = **当前英雄位置**（`core.status.hero.loc`），不使用 upFloor/downFloor 字段。
 - **完全绕过 `core.flyTo`**：不检查 canFlyTo、canFlyFrom、hasVisitedFloor、floorTofloor。
-- 不产生 `fly:MTn` 路由 token；切层事件在 route 中表现为普通 UDLR 走楼梯或 changeFloor。
+- 不产生 `fly:MTn` token；`useItem` 记录 `"item:upFly"` / `"item:downFly"` token，回放时调用 `useItemEffect` 执行 `changeFloor`，切层本身不额外记录。
 
 ---
 
-### I.8 路由核对：floor_transitions.json 分类修正
+### I.8 路由编码与切层分析修正
 
-`extract/analyze_floor_transitions.py` 对以下 3 次切层的分类**有误**，原因是错误假设了 K49/K50 和 ITEM:50 的含义：
+#### 路由编码规则（来源：`core.utils._encodeRoute_encodeOne`，引擎 toString）
 
-| seq | global_idx | 路由 | 原分类（错误） | 实际 | 说明 |
-|-----|-----------|------|---------------|------|------|
-| 148 | 4368 | MT46→MT37 | centerFly | **fly魔杖** | 窗口内 ITEM:50 是 centerFly 道具的地面拾取，与飞行无关 |
-| 151 | 4534 | MT45→MT37 | keyboard_fly | **fly魔杖** | 窗口内 UNK:K50 是炸弹（键'2'），不是飞行快捷键 |
-| 177 | 5399 | MT48→MT47 | keyboard_fly | **fly魔杖** | 窗口内 UNK:K49 是锄头（键'1'），不是飞行快捷键 |
-
-**正确结论**：全部 220 次切层事件中，217 次为 `changeFloor`（走楼梯），3 次为 fly魔杖调用 `core.flyTo` 产生的 `fly:MTn` token。
-
-**analyze_floor_transitions.py 中的错误假设**：
-```python
-FLY_ITEM_IDS = {"50"}       # 错：ITEM:50 = centerFly 道具拾取，不是飞行触发
-KB_FLY_TOKENS = {"UNK:K49", "UNK:K50", "UNK:K52"}  # 错：K49=锄头 K50=炸弹 K52=上下飞翼列表
+```javascript
+// 关键分支（节选）
+if (t.indexOf("fly:") == 0)  return "F" + t.substring(4) + ":";  // "fly:MT37" → "FMT37:"
+if (t.indexOf("key:") == 0)  return "K" + t.substring(4);         // "key:49" → "K49"
+if (t.indexOf("item:") == 0) return "I" + _id2number(t.sub(5)) + ":"; // "item:centerFly" → "I{n}:"
+// 其他（changeFloor、stair 等）没有专用分支 → "(changeFloor:MTn)" 通用兜底
+// 但楼梯切层实际上根本不记录到路由（走到楼梯格 = 触发 changeFloor，无需显式记录）
 ```
-正确键盘映射（来源：items.json + 引擎 keyboard 配置）：
-- K49（键'1'）= 锄头（pickaxe）
-- K50（键'2'）= 炸弹（bomb/hammer）
-- K51（键'3'）= centerFly（瞬移）
-- K52（键'4'）= upFly/downFly 列表
+
+Python 解码器对应：`"FMT37:"` → `FLOOR:MT37`；`"K49"` → `UNK:K49`；`"K50"` → `UNK:K50`。
+
+#### 结论：220 条 FLOOR:MTn 全部来自 fly魔杖
+
+路由编码函数中，产生 `"FMTn:"` 的**唯一路径**是 `"fly:MTn"` token（由 `core.flyTo` 推入）。  
+楼梯切层没有对应分支，也不会推入 `"fly:MTn"`，因此**走楼梯时楼层切换不记录到路由**——回放时引擎执行英雄踩上楼梯格的 UDLR 动作，changeFloor 自动触发，无需显式 token。
+
+> ~~"全部 220 次切层事件中，217 次为 changeFloor（走楼梯），3 次为 fly魔杖"~~ ← **此前结论错误，已废除。**
+>
+> **正确结论：全部 220 次 FLOOR:MTn token 均为 fly魔杖使用，楼梯切层隐含于 UDLR 动作序列中，不产生独立 token。**
+
+#### floor_transitions.json 分类的根本问题
+
+`classify_transition` 的 "type" 字段用于猜测切层原因，但：
+- trigger=None（无非中性前驱 token）→ 误标 `changeFloor` → 实为 **fly魔杖**（飞行前只有 UDLR）
+- trigger=ITEM:50 → 误标 `centerFly` → 实为 **fly魔杖**（ITEM:50 是地面道具拾取，与飞行无关）
+- trigger=UNK:K50/K49 → 误标 `keyboard_fly` → 实为 **fly魔杖**（K50=炸弹/K49=锄头，与飞行无关）
+
+3 条具体误标（可从楼层跨度直接验证）：
+
+| seq | global_idx | 路由 | 楼层跨度 | 原分类 | 正确分类 | 前驱 token 真实含义 |
+|-----|-----------|------|---------|--------|---------|-------------------|
+| 148 | 4368 | MT46→MT37 | 9层 | centerFly | **fly魔杖** | ITEM:50 = 拾取 centerFly 道具 |
+| 151 | 4534 | MT45→MT37 | 8层 | keyboard_fly | **fly魔杖** | UNK:K50 = 炸弹（键'2'） |
+| 177 | 5399 | MT48→MT47 | 1层 | keyboard_fly | **fly魔杖** | UNK:K49 = 锄头（键'1'） |
+
+seq=177 楼层跨度仅 1 层，无法从跨度排除楼梯；但编码规则已确认楼梯不记录 FLOOR token，故 FLOOR:MT47 必为 fly魔杖。
+
+#### 正确键盘映射（来源：`_encodeRoute_encodeOne`："key:n" → "Kn"；keyCode 49='1', 50='2', 51='3', 52='4'）
+
+| 路由 token | 编码 token | 键 | 绑定道具 |
+|-----------|-----------|-----|---------|
+| "key:49" | K49 | '1' | 锄头 pickaxe |
+| "key:50" | K50 | '2' | 炸弹 bomb/hammer |
+| "key:51" | K51 | '3' | centerFly 瞬移 |
+| "key:52" | K52 | '4' | upFly/downFly 列表 |
 
 ---
 
