@@ -613,42 +613,67 @@ CHOICE token 消耗：5 个（演出对话 ×2 + 苏醒对话 ×3）。
 | HP | **是** → 400 | setValue 直接赋值 |
 | ATK | **是** → 10 | setValue 直接赋值 |
 | DEF | **是** → 10 | setValue 直接赋值 |
-| 武器/盾牌 flag | **是** → null | 脚本显式卸装 |
+| 武器/盾牌 flag | **是** → null | 脚本显式卸装；sword5/shield5 **永久失去**（见下） |
 | flag:魔法免疫 | **是** → false | 脚本显式移除 |
 | 背包道具 | **否** | 脚本无 items 操作 |
 | 钥匙 | **否** | 脚本无 keys 操作 |
 | 金币 | **否** | 脚本无 money 操作 |
 | 已拾取宝石/药水的累计加成 | 已被清零 | 宝石加成已计入 status:atk/def，被 setValue=10 覆盖 |
 
-### H.4 路线实测（route cross-check）
+**sword5/shield5 永久失去（重要）**：`core.firstData.hero.items = {fly:1}` — sword5 和 shield5 从未放入 items 字典，只以 `flag:nowWeapon/nowShield` 形式存在。伏击将这两个 flag 设为 null 后，两把装备从游戏状态中**彻底消失**，无法重装。伏击后 ATK=10/DEF=10 是永久基底，需靠宝石和商店累积重建。
 
-对 `51_*.h5route` 全 6360 个 token 分析：
+### H.4 route 起始状态裁定（存档实际数据）
 
-MT3 共 5 次进入（1次初始遍历无 FLOOR:MT3 标记 + 4次有 FLOOR:MT3 标记，global[573/1127/1500/4966]）：
+**外层 JSON 字段**：`name / version / hard / seed / route` 仅此五项，**无任何英雄状态**。  
+→ route 重放初始化完全依赖 `core.firstData`。
 
-| MT3 访问 | global 范围 | token 数 | CHOICE 数 |
-|----------|------------|----------|-----------|
-| 初始遍历（g < 186） | 0–185 | 184 UDLR + 1 CHOICE:0 | 1（另类，见 H.5） |
-| 记录访问 1（g=573）| 574–610 | 37 UDLR | **0** |
-| 记录访问 2（g=1127）| 1128 | 1 UDLR（L） | **0** |
-| 记录访问 3（g=1500）| 1501–1502 | 2 UDLR | **0** |
-| 记录访问 4（g=4966）| 4967 是 FLOOR:MT4 | 0 | **0** |
+**`core.firstData.hero`（hero_init.json 来源）**：
+```
+floor=MT1, loc=(6,11),  HP=1000, ATK=100, DEF=100, mdef=0
+flags: {nowWeapon:"sword5", nowShield:"shield5", 魔法免疫:true}
+items: {fly:1}      ← sword5/shield5 仅在 flag，不在 items
+```
 
-**结论：此条路线从未触发 (5,9) 伏击。** 伏击需 5 个连续 CHOICE；所有 MT3 访问窗口中均未出现。
+**MT1 `firstArrive`（MT1.json 直接证据）**：
+- `choices "开启flash特性？"` + `choices "开启疯狂加血？"` ← 两个 `choices` 类型二选一对话
+- route global[0-1] = CHOICE:1,CHOICE:1 = 两项均选"不开启"
+- → route **从 MT1 游戏开始时刻启动**，firstArrive 立即触发
 
-因伏击从未触发，"重置后(400/10/10)的战斗损血"在本路线中无法从 route 直接校验。script 赋值（setValue=400/10/10）与用户描述（游戏实测触发结果）吻合，机制已通过源码确认。
+**route 走位模拟（前55步）**：
+- global[2]=L → MT1(5,11) ✓；global[4]=U → MT1(5,10) = yellowKey 拾取 ✓  
+- global[55]=L → **MT1(1,1) = upFloor → changeFloor to MT2**（第一次跨层）  
+- global[56-64]=D×9 = MT2 上的跨层后废输入
 
-### H.5 CHOICE:0 at global[116] 的身份（初始 MT1-3 遍历）
+→ **裁定 (b)：route 从 MT1 (6,11) 初始状态出发，包含伏击前全部 MT1-3 段落。**
 
-上下文：g=109-114=R×6 → g=115=U → **g=116=CHOICE:0** → g=117-119=L×3  
-推断：英雄走到 (11,5)，向上 (U) 与 MT3 (11,4) 的 `oldman(121)` 互动，CHOICE:0 = 关闭对话。  
-与伏击无关（仅 1 个 CHOICE，伏击需 5 个）。
+### H.5 伏击触发状态与 CHOICE 缺失的解释
 
-### H.6 优化含义
+**伏击强制必经（MT3 地图验证）**：  
+MT3 row 10 可通行格仅 (5,10)；从 (5,10) 向上唯一路径 = **(5,9) 伏击格**。无任何绕行路径。  
+→ 首次遍历 MT3 必定触发伏击。
 
-- **伏击是陷阱，最优路线回避 (5,9)**：ATK/DEF 降至 10 后战斗损血激增，最优解不踩此格。
-- **模拟器须建模此事件**：若路径经过 (5,9)，触发状态变化影响后续所有战斗计算。不可静默忽略。
-- **道具/钥匙/金币不被重置**：若某路线触发伏击前已拿到资源，资源保留——但最优路线不经 (5,9)，故此边界在当前存档中不适用。
+**CHOICE token 为何缺失（两类指令对比）**：
+
+| 指令类型 | 示例 | route 是否录入 |
+|----------|------|----------------|
+| `choices` 类型（多选一） | MT1 firstArrive，祭坛 | **是** → CHOICE:n |
+| `\t[name]text`（纯文本，非拦截） | MT3 伏击全部 5 条对话 | **否** → 无 token |
+| `\t[name]text` + intercepting 机制 | MT10 小偷 | **是** → CHOICE:1（恢复冻结事件流，非对话本身） |
+
+MT3 伏击 5 条对话均为 `\t[name]text` 格式，无 `choices` 索引，无 intercepting 机制。  
+→ **伏击在初始 MT3 遍历中触发，但对话不产生 CHOICE token。route 中看不到痕迹不等于没触发。**
+
+**CHOICE:0 at global[116] 的身份**：  
+模拟显示英雄在跨层后（MT2 或 MT3 上），与某 NPC 进行 `choices` 类型互动（CHOICE:0 = 第一选项）。仅 1 个 CHOICE，与伏击（需 5 个 `\t-text` 对话，均无 CHOICE）无关。
+
+**伏击后续**：changeFloor 将英雄传送至 MT2(3,8)，HP=400/ATK=10/DEF=10，route 从此继续，最终 FLOOR:MT4@g=186。
+
+### H.6 优化含义（修正版）
+
+- **伏击是强制必经，非可绕开陷阱**：(5,9) 是 MT3 唯一上行路径，初次遍历必触发。求解器基线 = 伏击后的 400/10/10。
+- **sword5/shield5 永久失去**：两者不在 items 中，伏击 unequip 后无法重装。ATK=10/DEF=10 是不可逆的初始重置值，之后靠宝石和祭坛重建。
+- **伏击前的 ATK/DEF 宝石加成全部清零**：setValue=10 覆盖所有前期 ATK/DEF 积累。**伏击前 ATK/DEF 宝石拾取无价值**；但 **钥匙和金币不被重置，伏击前积累的钥匙可在重回 MT1-2 时解锁资源**。
+- **模拟器须建模此事件**：必须实现 (5,9) 触发的 setValue + changeFloor，否则伏击后所有战斗伤害计算错误。
 
 ---
 
