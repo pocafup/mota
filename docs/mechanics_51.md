@@ -861,9 +861,10 @@ function floorTofloor(toId):
 | MT46 | [11, 2] | [11, 10] |
 | MT47 | [11, 10] | [2, 1] |
 | MT48 | [11, 10] | [1, 10] |
-| MT49 | [2, 11] | null |
+| MT49 | [2, 11] | **null**（无上楼梯；MT49→MT50 只能用 upFly） |
 
-注：MT1–MT9、MT11–MT43 的 upFloor/downFloor 待完整楼层提取后补充（须运行 gen_floors.py 扩展范围）。
+注：MT49 的 upFloor = null 已由引擎取值确认（`core.floors['MT49'].upFloor` = undefined）。MT49 的 changeFloor 字典仅有 `"1,11"` 一条（→ `:before` = MT48），无指向 MT50 的楼梯格。
+MT1–MT9、MT11–MT43 的 upFloor/downFloor 待完整楼层提取后补充（须运行 gen_floors.py 扩展范围）。
 
 ---
 
@@ -946,6 +947,52 @@ function(itemId) {
 
 ### I.7 upFly / downFly（±1层飞翼）
 
+#### 使用前校验（canUseItemEffect，来源：浏览器引擎 toString，2026-05-31）
+
+```javascript
+// upFly canUseItemEffect
+(function () {
+    var floorId = core.status.floorId,
+        index = core.floorIds.indexOf(floorId);
+    if (index >= 49) {               // ← 硬编码封顶：从 index≥49 的层起飞 → 拒绝
+        core.drawTip('你已在最高层');
+        return false;
+    }
+    if (index < core.floorIds.length - 1) {
+        var toId = core.floorIds[index + 1],
+            toX = core.getHeroLoc('x'),
+            toY = core.getHeroLoc('y');
+        var mw = core.floors[toId].width, mh = core.floors[toId].height;
+        if (toX >= 0 && toX < mw && toY >= 0 && toY < mh
+            && core.getBlockId(toX, toY, toId) == null) {
+            return true;             // ← 目标层该坐标为空 → 允许
+        }
+    }
+    core.drawTip('上一层此位置有东西');
+    return false;
+})();
+
+// downFly canUseItemEffect
+(function () {
+    var floorId = core.status.floorId,
+        index = core.floorIds.indexOf(floorId);
+    if (index < 1) {                 // ← 硬编码地板：已在最低层 → 拒绝
+        core.drawTip('你已在地下室');
+        return false;
+    }
+    var toId = core.floorIds[index - 1],
+        toX = core.getHeroLoc('x'),
+        toY = core.getHeroLoc('y');
+    var mw = core.floors[toId].width, mh = core.floors[toId].height;
+    if (toX >= 0 && toX < mw && toY >= 0 && toY < mh
+        && core.getBlock(toX, toY, toId) == null) {
+        return true;                 // ← 目标层该坐标为空 → 允许
+    }
+    core.drawTip('下一层此位置有东西');
+    return false;
+})();
+```
+
 `upFly useItemEffect`（源码）：
 ```javascript
 var floorId = core.floorIds[core.floorIds.indexOf(core.status.floorId) + 1];
@@ -963,11 +1010,27 @@ if (core.status.event.id == 'action') {
 ```
 `downFly` 同理，改为 `currentIndex - 1`。
 
+#### upFly / downFly 与 fly魔杖 的检查项对比
+
+| 检查项 | fly魔杖（core.flyTo） | upFly | downFly |
+|-------|----------------------|-------|---------|
+| `canFlyFrom[fromId]` | ✅ 检查 | ❌ **不检查** | ❌ **不检查** |
+| `canFlyTo[toId]` | ✅ 检查 | ❌ **不检查** | ❌ **不检查** |
+| `hasVisitedFloor` | ✅ 检查 | ❌ 不检查 | ❌ 不检查 |
+| floorTofloor gate1 | ✅ 检查 | ❌ 不检查 | ❌ 不检查 |
+| 层索引封顶 | — | ✅ `index >= 49` → 拒绝 | — |
+| 层索引地板 | — | — | ✅ `index < 1` → 拒绝 |
+| 目标格为空 | — | ✅ getBlockId==null | ✅ getBlock==null |
+
+**关键结论**：
+- `canFlyTo` / `canFlyFrom` **只对 fly魔杖生效**，对 upFly/downFly 无效。
+- upFly 的封顶是**硬编码 `index >= 49`**，不是 canFlyTo：从 MT49（index=49）起飞时 49≥49 → 拒绝，因此 **MT49→MT50 通过 upFly 不可行**（不是因为 canFlyTo=false，而是因为硬编码封顶）。
+- downFly **不检查 canFlyFrom**，只检查目标层该坐标是否有障碍物。
+
 **传送规则**：
-- 目标层 = 当前层在 floorIds 数组中的下标 ±1 对应的楼层 ID。
-- 降落坐标 = **当前英雄位置**（`core.status.hero.loc`），不使用 upFloor/downFloor 字段。
-- **完全绕过 `core.flyTo`**：不检查 canFlyTo、canFlyFrom、hasVisitedFloor、floorTofloor。
-- 不产生 `fly:MTn` token；`useItem` 记录 `"item:upFly"` / `"item:downFly"` token，回放时调用 `useItemEffect` 执行 `changeFloor`，切层本身不额外记录。
+- 目标层 = 当前层 floorIds 下标 ±1 的楼层 ID。
+- 降落坐标 = **当前英雄坐标**，不使用 upFloor/downFloor 字段。
+- 不产生 `fly:MTn` token；记录 `"item:upFly"` / `"item:downFly"` token（编码为 `I{n}:`）。
 
 ---
 
@@ -998,12 +1061,22 @@ FMTn: 出现次数：220   ← 与 floor_transitions 分析的 220 条 FLOOR:MTn
 
 **从未出现为 FMTn: 的楼层**：MT0, MT21–MT23, MT27–MT30, **MT44**, **MT50**。
 
-**实验 2 — MT50 铁证（走楼梯不产生 FMTn:）：**
+**实验 2 — MT50 铁证（FMT50:=0 的真实含义）：**
 
-- MT50：`canFlyTo=false`，`canFlyFrom=false` → 完全不可飞行，只能走楼梯进入（从 MT49 的上楼梯）
-- 此存档为通关存档，玩家必然到达 MT50（否则无法通关）
+- MT50：`canFlyTo=false`，`canFlyFrom=false` → 不可用 fly魔杖 进出
+- 此存档为通关存档，玩家必然到达 MT50
 - **FMT50: 出现次数 = 0**
-- 结论：玩家走楼梯到达 MT50，**该楼梯切层不产生任何 FMTn: token**
+- ~~初始推断：只能走楼梯从 MT49 上楼梯进入~~ ← **已推翻**
+
+**实测更正（玩家行为级事实 + 引擎源码双重验证）**：
+
+MT49 **根本没有通往 MT50 的楼梯**（引擎确认：`core.floors['MT49'].changeFloor` 只有 `"1,11":before` 一条，指向 MT48，无指向 MT50 的条目；`upFloor=null`）。MT49→MT50 唯一路径是 **upFly 道具**（绕过 canFlyTo=false，产生 `ITEM:{n}` token 而非 FMTn:）。
+
+MT50 的真实入场方式有两种，均不产生 FMT token：
+1. **upFly（ITEM token）**：从 MT49 使用 upFly 道具，绕过 canFlyTo 限制，落点 = 当前英雄坐标（§I.7）
+2. **MT24 特殊事件传送（无 token）**：踩 MT24(6,2) 触发条件事件（见 §I.9）
+
+因此 FMT50:=0 的正确结论是：**MT50 的入场路径均不产生 FMT token**，不是"走楼梯"的证据。
 
 **实验 3 — 开局段（UDLR 纯序列）：**
 
@@ -1022,10 +1095,29 @@ R3 U10 L1 D3 R2 U2 L1 D4 R6 U1 C0 L3 D6 R5 U6 L10 D5 R4 U5 R5 D3 L3 D5 R4 L5
 | 类型 | 路由表现 | 本存档计数 |
 |------|---------|-----------|
 | **fly魔杖** | `fly:MTn` → 编码为 `FMTn:` → 解码为 `FLOOR:MTn` | **220 次** |
-| **走楼梯** | 不记录 token，隐含于 UDLR 序列，changeFloor 在回放时自动触发 | 未知（可能为 0 或极少） |
+| **走楼梯** | 不记录 token，隐含于 UDLR 序列，changeFloor 在回放时自动触发 | 未知（需模拟器统计） |
 | **upFly/downFly** | `item:upFly` / `item:downFly` → 编码为 `I{n}:` → 解码为 `ITEM:{n}` | 若有则在 ITEM token 中 |
+| **特殊事件传送** | 事件脚本内 changeFloor 指令触发，不记录任何 token | 已确认至少 2 次（MT3伏击→MT2；MT24事件→MT50）|
 
 floor_transitions.json 的 `type` 字段（"changeFloor"/"centerFly"/"keyboard_fly"）**全部错误**：220 条 FLOOR:MTn token 均来自 fly魔杖；"changeFloor" 标签是因为前驱 token 窗口全为 UDLR/CHOICE（无特殊 token），不是楼梯的证据。
+
+#### "无 FMT token 楼层"的正确推断方法（修订）
+
+**推断原则**：某楼层从未出现为 FMTn: 目的地，只能说明"该楼层未被 fly魔杖 以其为目的地飞入"。可能原因：
+1. 该楼层从未被访问过（skip）
+2. 该楼层经由 **走楼梯** 进入（UDLR 到楼梯格，无 token）
+3. 该楼层经由 **upFly/downFly** 进入（产生 ITEM token，非 FMT token）
+4. 该楼层经由 **事件脚本 changeFloor** 传送进入（无任何 token）
+
+MT50 是第 4 类被误判为第 2 类的反例。**禁止用"不是 fly 就是走楼梯"的排除法推断**。
+
+| 无 FMT 楼层 | canFlyTo | 入场方式 | 确定性 |
+|-----------|---------|---------|--------|
+| MT0 | false | 若访问过：从 MT1 走楼梯（changeFloor 字典有 `"1,1":next=MT1`，出口可 fly） | **未知**（可能未访问） |
+| MT21–MT23 | **true（普通楼层）** | canFlyTo=true 与其余可飞层相同；若本存档未出现 FMTxx:，可能从未被访问或走楼梯进入 | 普通情形，无特殊机制；是否访问留给全程模拟器统计（J10） |
+| MT27–MT30 | **true（普通楼层）** | 同上 | 同上 |
+| MT44 | false（isHide=true） | 只能从 MT45 走楼梯入（changeFloor 仅有 `"1,1":next=MT45`，upFloor=downFloor=null）；可 fly出 | **已确认**（canFlyTo=false+isHide） |
+| MT50 | false | **唯一入场：MT24(6,2) 事件 changeFloor**（见 §I.9）；fly魔杖/upFly/downFly 均无法到达 | **已确认**（见 §I.9）|
 
 #### 3 条具体误标记录（用前驱 token 核实）
 
@@ -1046,6 +1138,98 @@ floor_transitions.json 的 `type` 字段（"changeFloor"/"centerFly"/"keyboard_f
 
 ---
 
+### I.9 特殊事件传送：MT24(6,2) → MT50(6,7)
+
+**来源**：`core.floors['MT24'].events["6,2"]`（浏览器引擎 toString，2026-05-31）
+
+#### I.9.1 触发条件与脚本
+
+踩上 MT24 坐标 **(6,2)** 时触发，脚本如下：
+
+```json
+{
+  "6,2": [
+    {
+      "type": "if",
+      "condition": "flag:营救公主",
+      "true": [
+        { "type": "setCurtain", "color": [0,0,0], "time": 200, "keep": true },
+        {
+          "type": "for", "name": "temp:A", "from": "24", "to": "50", "step": "1",
+          "data": [
+            { "type": "function",
+              "function": "function(){core.ui.statusBar._update_props(core.floors[\"MT\" + core.calValue(\"temp:A\")].title)}" },
+            { "type": "sleep", "time": 80 }
+          ]
+        },
+        { "type": "changeFloor", "floorId": "MT50", "loc": [6,7], "direction": "down", "time": 200 },
+        { "type": "setCurtain", "time": 200 }
+      ],
+      "false": []
+    }
+  ]
+}
+```
+
+**关键字段说明**：
+
+| 字段 | 值 | 含义 |
+|------|-----|------|
+| 触发位置 | MT24(6,2) | 踩格触发，**无条件检查 enable**（首次踩就运行 if） |
+| 触发条件 | `flag:营救公主` | 必须事先设置此 flag（取值 true）才会传送；否则 false 分支为空，什么都不发生 |
+| 视觉效果 | `for 24→50` + `sleep 80ms/层` | 纯演出：状态栏依次显示 MT24–MT50 标题，约 2.1 秒动画，无实际属性变化 |
+| 目标楼层 | `MT50` | 直接跳过 MT25–MT49 |
+| 落点 | `loc=[6,7]` | MT50 坐标 (6,7)，即 `map[7][6]` |
+| 指令类型 | `changeFloor`（事件脚本内） | 不产生任何路由 token（既非 FMTn: 也非 ITEMn:） |
+
+#### I.9.2 MT49 / MT50 顶层区域连通结构（已勘误）
+
+| 连通关系 | 方式 | token | 是否产生 FMT | 备注 |
+|---------|------|-------|------------|------|
+| MT48 → MT49（入） | fly魔杖（canFlyTo=true）或 走楼梯（MT48 upFloor） | FMT49: 或 无 | fly时产生 | 正常 |
+| MT49 → MT48（出） | 走楼梯 (1,11)→:before 或 fly魔杖 | 无 或 FMTx: | fly时产生 | 正常 |
+| ~~MT49 → MT50（upFly）~~ | ~~upFly 道具~~ | — | — | **❌ 错误已删除**：upFly 从 MT49（index=49）起飞时被 `index>=49` 硬编码封顶，无法到达 MT50 |
+| **MT24(6,2) → MT50(6,7)** | **事件 changeFloor**（`flag:营救公主=true`）| **无 token** | ❌ 无 FMT | MT50 **唯一入场路径** |
+| MT50 → MT49（downFly） | downFly 道具（**不检查 canFlyFrom**，只检查目标格） | ITEM:{n} | ❌ 无 FMT | **位置限制**：目标格 MT49(x,y) 须为空；MT49(6,7) 初始为 specialDoor（需清除后才可用） |
+| MT50 → 其他 fly魔杖 | ❌ canFlyFrom=false → 被 core.flyTo 拒绝 | — | — | fly魔杖 检查 canFlyFrom |
+| MT50 → MT51（upFly） | ❌ MT50 index=50，`50>=49` → 硬编码封顶 | — | — | MT51 不存在且被封顶 |
+
+**MT50 进入：唯一路径是 MT24 事件 changeFloor**
+
+fly魔杖、upFly、downFly 三者均无法到达 MT50，原因各不相同：
+
+| 道具 | 失败原因 | 检查字段 |
+|------|---------|---------|
+| fly魔杖 | `canFlyTo[MT50]=false` | `core.flyTo` 检查 canFlyTo |
+| upFly（从 MT49） | `index >= 49` → 硬编码封顶 | **不检查 canFlyTo**，由 index 封顶 |
+| downFly | MT51 不存在，目标层 = floorIds[51] = undefined | — |
+
+**MT50 离开：downFly 理论上可行（位置相关）**
+
+downFly 不检查 canFlyFrom。从 MT50 的某坐标 (x,y) 向下飞，目标为 MT49(x,y)。MT49 多数位置初始有墙或特殊门，需具体检查目标格。本存档具体离场方式待模拟器跑通后统计（J12）。
+
+**原引擎取值确认**：
+- `core.floors['MT49'].upFloor` = `undefined`（null）—— MT49 无上楼梯
+- `core.floors['MT49'].changeFloor` 仅有 `"1,11":before`，无 `:next` 条目 —— 无走楼梯到 MT50
+- `core.floors['MT50'].changeFloor` = `{}`（空）—— MT50 无楼梯格
+- `upFly_checks_canFlyTo` = false、`downFly_checks_canFlyFrom` = false（引擎取值直接确认）
+
+#### I.9.3 `flag:营救公主` 的设置时机
+
+**待确认（J9）**：此 flag 由哪个楼层/事件设置，目前未查。
+推测涉及 MT44 或公主相关剧情楼层，需提取对应楼层事件脚本后确认。
+模拟器须在触发 MT24(6,2) 事件前确保此 flag 已正确写入 `hero.flags`。
+
+#### I.9.4 模拟器实现要点
+
+1. `_execute_instruction()` 需支持 `changeFloor` 指令类型（当前未实现，同 MT3 伏击）。
+2. `for` 循环指令（type="for"）：纯视觉演出，模拟器可作为 **no-op** 处理（不改变任何属性）。
+3. 切层目标 `MT50, loc=[6,7]` 须写入 `pending_floor_change`，外层循环完成跨层。
+4. 此事件**无 `hide/remove=true`**：可重复触发（每次踩 MT24(6,2) 且 flag:营救公主=true 都会传送）。
+   → 模拟器不需要用 `_suppressed_events` 抑制此事件（除非引擎另有逻辑，待确认）。
+
+---
+
 ## J. 未确认项
 
 以下条目标记为**待确认**，禁止在模拟器中假设：
@@ -1060,3 +1244,7 @@ floor_transitions.json 的 `type` 字段（"changeFloor"/"centerFly"/"keyboard_f
 | J6 | 魔法免疫 flag 的设置条件（MT3 伏击已确认为移除路径之一，见 §H） | 中 |
 | ~~I7~~ | ~~MT10 (6,3) 机关门开放机制~~ | **已确认**（见 §G） |
 | J8 | flag:fly 设置条件（fly魔杖飞行连通性检查的开关，见 §I.3.1） | 高 |
+| J9 | `flag:营救公主` 的设置时机和位置（MT24(6,2)→MT50 传送的触发条件，见 §I.9.3） | 高 |
+| J10 | MT21–MT23、MT27–MT30 在本存档中是否实际访问（canFlyTo=true 普通层，走楼梯或未访问均可能），跑全程模拟器统计即可 | 低 |
+| J11 | MT24(6,2) 事件在 `flag:营救公主=true` 时是否可重复触发（无 `hide/remove=true`，引擎行为待确认） | 中 |
+| J12 | MT50 的实际离场方式：downFly 不检查 canFlyFrom，但需目标格 MT49(x,y) 为空；本存档具体离场坐标和 token 待模拟器统计 | 低 |
