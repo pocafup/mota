@@ -372,13 +372,29 @@ def _process_move(state: GameState, direction: str) -> None:
         return
 
     if e_tile in floor._tile_to_entity:
-        # NPC 可通行性由 floor event 的 noPass 字段决定：
-        # True → 阻挡（不更新坐标）；null / false / 缺失 → 可踩入
         ev = floor.events.get(f"{nx},{ny}")
-        no_pass = isinstance(ev, dict) and ev.get("noPass") is True
-        _fire_events(state, nx, ny)
-        if not no_pass:
+        # 事件已禁用（enable: false）→ hero 直接通过（如 MT1 作者NPC）
+        if isinstance(ev, dict) and ev.get("enable") is False:
             hero.x, hero.y = nx, ny
+            return
+        # 有激活事件（如 MT2 小偷列表事件）→ 触发；hide 清实体后 hero 可移入
+        if ev is not None:
+            _fire_events(state, nx, ny)
+            cur_fl = state.floors.get(state.current_floor)
+            if (cur_fl and not cur_fl._event_intercepting
+                    and 0 <= ny < len(cur_fl.entities)
+                    and 0 <= nx < len(cur_fl.entities[ny])
+                    and cur_fl.entities[ny][nx] == 0):
+                hero.x, hero.y = nx, ny
+            return
+        # 无楼层事件（如 MT3 老人型 NPC）→ 默认对话交互：hero 停在原格
+        # CHOICE token 消费后再执行 hide，hero 随后才能走入
+        floor._event_intercepting = True
+        floor._event_pending_choices = []
+        floor._event_pending_instrs = [
+            {"type": "hide", "loc": [[nx, ny]], "remove": True, "time": 0}
+        ]
+        floor._event_pending_xy = (nx, ny)
         return
 
     if t_tile in DOOR_KEY_MAP:
@@ -600,6 +616,7 @@ def _execute_instruction(
         else:
             if instr.get("remove"):
                 floor._suppressed_events.add(f"{event_x},{event_y}")
+            floor.entities[event_y][event_x] = 0  # 无 loc 时清除事件触发格实体
         return
 
     # ── setBlock ──────────────────────────────────────────────────────────────
