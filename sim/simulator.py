@@ -552,8 +552,8 @@ def _execute_event_list(
                 floor._event_pending_xy = (event_x, event_y)
                 return
 
-            # 同步的 move/generateMove → 进入阻塞动画上下文
-            if t in ("move", "generateMove") and not instr.get("async", False):
+            # 同步的 move → 进入阻塞动画上下文（generateMove 是 h5mota 异步动画指令，不阻塞事件流）
+            if t == "move" and not instr.get("async", False):
                 ctx["had_sync_anim"] = True
 
             _execute_instruction(state, instr, event_x, event_y, ctx)
