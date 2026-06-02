@@ -5,6 +5,9 @@
   "width": 13,
   "height": 13,
   "ratio": 1,
+  "_landing_note": "downFloor/upFloor: fly魔杖/楼梯落点 [x,y]，来源: browser core.floors[id].downFloor/upFloor",
+  "downFloor": [1, 2],
+  "upFloor": [11, 10],
   "bgm": "section1.mp3",
   "_map_note": "map[y][x]，0=地板，1=墙。tile ID 含义见 tiles.json。",
   "map": [
@@ -42,14 +45,12 @@
       ],
       "skeleton(209)": [
         "(10,3)",
-        "(8,6)",
         "(5,11)"
       ],
       "bat(205)": [
         "(11,4)",
-        "(2,9)"
-      ],
-      "skeletonSoldier(210)": [
+        "(2,9)",
+        "(8,6)",
         "(9,6)"
       ]
     },
