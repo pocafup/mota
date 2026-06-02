@@ -233,7 +233,7 @@ extract/
 
 ---
 
-## 七、13检查点回归状态（2026-06-02 更新）
+## 七、13检查点回归状态（2026-06-02 更新，12/13 PASS）
 
 ### 已确认结论
 
@@ -248,7 +248,7 @@ extract/
 - `tokens[:N]` 每点少跑 1 步，坐标偏 1 格，但因相邻步通常无属性变化，大多数点碰巧 PASS 而遮盖偏差。
 - 只有当第 N+1 步恰好跨越属性事件（如血瓶拾取）时才暴露（tok[500] 就是典型案例）。
 
-验证：改为 `tokens[:N+1]` 后，原 8 个 PASS 点仍全部 PASS，tok[500] 从 FAIL 转 PASS。**当前 9/13 PASS。**
+验证：改为 `tokens[:N+1]` 后，原 8 个 PASS 点仍全部 PASS，tok[500] 从 FAIL 转 PASS。
 
 #### (b) Route 记录撞墙 token（纠正旧假设）
 
@@ -270,17 +270,35 @@ extract/
 
 **待办**：`M<n>:<count>` 的语义待确认（可能是商店/飞行道具调用），修复解析器前需先理解其含义。当前优先级：低（不阻塞 tok[1300] 以内的回归）。
 
-#### (d) 当前 PASS/FAIL 状态（口径修正后，2026-06-02）
+#### (d) MT10(6,11) 楼梯门 enable 机制（已修复，commit 335dfd8）
+
+**根因**：`show` 指令在模拟器里是 no-op，导致 MT10(6,11) 的 `events["6,11"].enable` 永远不从 `false` 变为 `true`。同时 `_apply_stair_change` 不检查 `enable`，导致楼梯在 Visit4 之前（tok[946]、tok[992]）就错误触发，英雄过早进入 MT11。
+
+**修复内容**（simulator.py，commit 335dfd8）：
+1. `show` 指令实现：遍历 `loc` 列表，将 `events[loc_key]["enable"]` 置为 `True`。
+2. `_apply_stair_change` 新增 enable 检查：若 `events[loc_key].get("enable") is False`，则返回 False（楼梯不触发）。
+
+**连锁效果**：tok[1000]（floor 从 MT11→MT10）、tok[1100]、tok[1200] 均因此转绿。
+
+#### (e) 当前 PASS/FAIL 状态（2026-06-02，commit 335dfd8）
 
 | 检查点 | 状态 | 备注 |
 |--------|------|------|
-| tok[100..900]（9个） | ✅ PASS | 含 tok[500]（口径修正后转绿） |
-| tok[1000] | ❌ FAIL | floor:MT11≠MT10, HP+45, ATK-1（深层独立bug） |
-| tok[1100] | ❌ FAIL | HP-292, ATK-1（深层独立bug） |
-| tok[1200] | ❌ FAIL | HP-292, ATK-1（深层独立bug） |
-| tok[1300] | ❌ FAIL | floor:MT10≠MT14, HP-414, ATK-13（深层独立bug） |
+| tok[100..900]（9个） | ✅ PASS | 原有全部保持，无回归 |
+| tok[1000] | ✅ PASS | enable修复后转绿（floor=MT10, HP=304, ATK=27） |
+| tok[1100] | ✅ PASS | 连锁转绿 |
+| tok[1200] | ✅ PASS | 连锁转绿 |
+| tok[1300] | ❌ FAIL | floor=MT10（真值MT14）、HP-84、ATK-12 |
 
-tok[1000..1300] 的偏差与口径无关，是 tok[900] 之后独立的模拟器 bug，下个会话调查。
+**总计：12/13 PASS。tok[1300] 是 tok[1200] 之后的独立深层 bug，留待下个会话专查。**
+
+#### (f) tok[1300] 待查信息
+
+- 偏差：`floor=MT10`（真值 `MT14`）、`HP` 少 84、`ATK` 少 12
+- ATK-12 意味着跨越多个剑类道具/红宝石的差距，楼层完全不对，是大范围偏差
+- 玩家指出这牵涉 MT10 埋伏 Visit4 之后的特殊事件链（骷髅队长 afterBattle 系列）
+- tok[1200] 已经 PASS（floor=MT10, HP=510, ATK=27, DEF=27），偏差在 tok[1200]→tok[1300] 这 100 步内产生
+- **下个会话任务**：追踪 tok[1200]→tok[1300] 的属性演化，定位首个偏差 token；重点排查高层（MT11–MT14）的切层机制和道具/装备事件
 
 ---
 
