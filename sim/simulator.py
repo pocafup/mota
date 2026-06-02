@@ -265,6 +265,10 @@ def _apply_stair_change(state: GameState) -> bool:
     cf = state.floor.change_floor.get(loc_key)
     if cf is None:
         return False
+    # h5mota: show 指令激活前 enable=False，楼梯不触发
+    ev = state.floor.events.get(loc_key)
+    if isinstance(ev, dict) and ev.get("enable") is False:
+        return False
     target_id = _resolve_floor_id(state, cf["floorId"])
     if not _load_floor_if_needed(state, target_id):
         return False  # 目标楼层未提取，楼梯不可用
@@ -387,14 +391,8 @@ def _process_move(state: GameState, direction: str) -> None:
                     and cur_fl.entities[ny][nx] == 0):
                 hero.x, hero.y = nx, ny
             return
-        # 无楼层事件（如 MT3 老人型 NPC）→ 默认对话交互：hero 停在原格
-        # CHOICE token 消费后再执行 hide，hero 随后才能走入
-        floor._event_intercepting = True
-        floor._event_pending_choices = []
-        floor._event_pending_instrs = [
-            {"type": "hide", "loc": [[nx, ny]], "remove": True, "time": 0}
-        ]
-        floor._event_pending_xy = (nx, ny)
+        # 无楼层事件的 NPC（老人/商人等）→ 交互为 no-op：hero 停在原格
+        # 路线中 CHOICE token 若随后到来，在非拦截状态下也是 no-op，不影响重放
         return
 
     if t_tile in DOOR_KEY_MAP:
@@ -402,8 +400,7 @@ def _process_move(state: GameState, direction: str) -> None:
         if hero.keys.get(key_id, 0) > 0:
             hero.keys[key_id] -= 1
             floor.terrain[ny][nx] = 0
-            hero.x, hero.y = nx, ny
-            _fire_events(state, nx, ny)
+            # 英雄不移入门格，下一个同向 token 走入（h5mota 引擎行为）
         return
 
     hero.x, hero.y = nx, ny
@@ -584,11 +581,21 @@ def _execute_instruction(
 
     # ── no-ops ────────────────────────────────────────────────────────────────
     if t in (
-        "waitAsync", "sleep", "playBgm", "playSound", "setBgFgBlock", "show",
+        "waitAsync", "sleep", "playBgm", "playSound", "setBgFgBlock",
         "setCurtain", "tip", "for", "function", "win", "vibrate",
         "setFg", "setBg", "flashBack", "fadeOut", "fadeIn", "scroll",
         "showStatusBar", "setStatusBar", "achievementGet",
     ):
+        return
+
+    # ── show ──────────────────────────────────────────────────────────────────
+    if t == "show":
+        for loc in instr.get("loc", []):
+            lx, ly = loc[0], loc[1]
+            lk = f"{lx},{ly}"
+            ev = floor.events.get(lk)
+            if isinstance(ev, dict):
+                ev["enable"] = True
         return
 
     # ── hide ─────────────────────────────────────────────────────────────────
