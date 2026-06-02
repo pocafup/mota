@@ -82,6 +82,7 @@ class FloorState:
     first_arrive: list = field(default_factory=list)
     after_get_item: dict = field(default_factory=dict)
     _first_arrive_done: bool = False
+    _event_break: bool = False
 
     @property
     def map(self) -> list:
@@ -104,6 +105,7 @@ class GameState:
     visited_floors: set
     pending_floor_change: dict | None  # {"floor_id", "x", "y"} set by changeFloor event
     _floors_dir: Path      # base directory for lazy floor loading
+    _common_events: dict = field(default_factory=dict)
 
     @property
     def floor(self) -> FloorState:
@@ -143,6 +145,7 @@ def _copy_state(state: GameState) -> GameState:
             _event_pending_instrs=list(f._event_pending_instrs),
             _event_pending_choices=list(f._event_pending_choices),
             _event_pending_xy=f._event_pending_xy,
+            _event_break=f._event_break,
             down_floor=f.down_floor,
             up_floor=f.up_floor,
             first_arrive=f.first_arrive,
@@ -157,6 +160,7 @@ def _copy_state(state: GameState) -> GameState:
         visited_floors=set(state.visited_floors),
         pending_floor_change=dict(state.pending_floor_change) if state.pending_floor_change else None,
         _floors_dir=state._floors_dir,
+        _common_events=state._common_events,
     )
 
 
@@ -319,9 +323,12 @@ def step(state: GameState, action: str) -> GameState:
             # 若是 choices 型事件，执行选中分支的 action 列表
             if choices and 0 <= n < len(choices):
                 _execute_event_list(state, choices[n].get("action", []), ex, ey)
-            # 执行后续主流程剩余指令（无再次拦截时）
-            if not state.floor._event_intercepting and remaining:
+            # 执行后续主流程剩余指令（无再次拦截、无 break 时）
+            if (not state.floor._event_intercepting
+                    and remaining
+                    and not state.floor._event_break):
                 _execute_event_list(state, remaining, ex, ey)
+            state.floor._event_break = False
         _check_auto_events(state)
         return state
 
@@ -381,15 +388,10 @@ def _process_move(state: GameState, direction: str) -> None:
         if isinstance(ev, dict) and ev.get("enable") is False:
             hero.x, hero.y = nx, ny
             return
-        # 有激活事件（如 MT2 小偷列表事件）→ 触发；hide 清实体后 hero 可移入
+        # 有激活事件（如商店/小偷列表事件）→ 触发后 hero 移入 NPC 格（h5mota 引擎先移位再触发事件）
         if ev is not None:
             _fire_events(state, nx, ny)
-            cur_fl = state.floors.get(state.current_floor)
-            if (cur_fl and not cur_fl._event_intercepting
-                    and 0 <= ny < len(cur_fl.entities)
-                    and 0 <= nx < len(cur_fl.entities[ny])
-                    and cur_fl.entities[ny][nx] == 0):
-                hero.x, hero.y = nx, ny
+            hero.x, hero.y = nx, ny
             return
         # 无楼层事件的 NPC（老人/商人等）→ 交互为 no-op：hero 停在原格
         # 路线中 CHOICE token 若随后到来，在非拦截状态下也是 no-op，不影响重放
@@ -570,6 +572,31 @@ def _execute_event_list(
                 return
 
 
+def _get_common_events(state: GameState) -> dict:
+    if not state._common_events:
+        path = state._floors_dir.parent / "common_events.json"
+        if path.exists():
+            state._common_events.update(json.loads(path.read_text(encoding="utf-8")))
+    return state._common_events
+
+
+def _run_while_body(
+    state: GameState, cond: str, body: list,
+    event_x: int, event_y: int, ctx: dict,
+) -> None:
+    """Execute one while-loop iteration; if choices intercept, prepend _while_continue sentinel."""
+    floor = state.floor
+    if not _eval_condition(cond, state):
+        return
+    _execute_event_list(state, body, event_x, event_y, ctx)
+    if floor._event_break:
+        floor._event_break = False
+        return
+    if floor._event_intercepting:
+        sentinel = {"type": "_while_continue", "_condition": cond, "_body": body}
+        floor._event_pending_instrs = [sentinel] + floor._event_pending_instrs
+
+
 def _execute_instruction(
     state: GameState, instr: dict, event_x: int, event_y: int,
     ctx: dict | None = None,
@@ -714,6 +741,31 @@ def _execute_instruction(
         _execute_event_list(state, branch, event_x, event_y, ctx)
         return
 
+    # ── insert ────────────────────────────────────────────────────────────────
+    if t == "insert":
+        name = instr.get("name", "")
+        body = _get_common_events(state).get(name)
+        if body is not None:
+            _execute_event_list(state, body, event_x, event_y, ctx)
+        return
+
+    # ── while ─────────────────────────────────────────────────────────────────
+    if t == "while":
+        _run_while_body(state, instr.get("condition", "true"),
+                        instr.get("data", []), event_x, event_y, ctx or {})
+        return
+
+    # ── _while_continue（内部哨兵，while 循环再入点）────────────────────────
+    if t == "_while_continue":
+        _run_while_body(state, instr.get("_condition", "true"),
+                        instr.get("_body", []), event_x, event_y, ctx or {})
+        return
+
+    # ── break ─────────────────────────────────────────────────────────────────
+    if t == "break":
+        floor._event_break = True
+        return
+
 
 # ─── Condition evaluator ─────────────────────────────────────────────────────
 
@@ -724,6 +776,11 @@ def _eval_condition(condition: str, state: GameState) -> bool:
 def _eval_single(part: str, state: GameState) -> bool:
     floor = state.floor
     hero = state.hero
+
+    if part in ("true", ""):
+        return True
+    if part == "false":
+        return False
 
     if part.startswith("flag:"):
         return bool(hero.flags.get(part[5:], False))
@@ -738,7 +795,43 @@ def _eval_single(part: str, state: GameState) -> bool:
         bx, by = int(m.group(1)), int(m.group(2))
         return floor.entities[by][bx] not in floor._tile_to_entity
 
+    # status:xxx op rhs（商店 while 条件等）
+    m = re.match(r'\(?status:(\w+)\s*(>=|<=|==|!=|>|<)\s*(.+?)\)?$', part)
+    if m:
+        stat, op, rhs = m.group(1), m.group(2), m.group(3).strip()
+        stat_map = {"atk": hero.atk, "def": hero.def_, "hp": hero.hp, "money": hero.gold}
+        lhs = stat_map.get(stat, 0)
+        rhs_val = _eval_value_expr(rhs, state)
+        if op == ">=": return lhs >= rhs_val
+        if op == "<=": return lhs <= rhs_val
+        if op == ">":  return lhs > rhs_val
+        if op == "<":  return lhs < rhs_val
+        if op == "==": return lhs == rhs_val
+        if op == "!=": return lhs != rhs_val
+
     return False
+
+
+# ─── Value expression evaluator ──────────────────────────────────────────────
+
+def _eval_value_expr(expr: str, state: GameState) -> int:
+    """Evaluate a numeric expression containing flag:/status: references."""
+    hero = state.hero
+
+    def _replace(m: re.Match) -> str:
+        kind, key = m.group(1), m.group(2)
+        if kind == "flag":
+            v = hero.flags.get(key, 0)
+            return str(int(v) if isinstance(v, (int, float)) else 0)
+        mapping = {"atk": hero.atk, "def": hero.def_, "hp": hero.hp,
+                   "money": hero.gold, "mdef": hero.mdef}
+        return str(mapping.get(key, 0))
+
+    s = re.sub(r'(flag|status):(\w+)', _replace, str(expr))
+    try:
+        return int(eval(s, {"__builtins__": {}}))  # noqa: S307
+    except Exception:
+        return 0
 
 
 # ─── setValue helper ─────────────────────────────────────────────────────────
@@ -752,6 +845,8 @@ def _set_value(state: GameState, name: str, value, operator: str | None = None) 
             val = False
         elif value == "null":
             val = None
+        elif re.search(r'(flag|status):', value):
+            val = _eval_value_expr(value, state)
         else:
             try:
                 val = int(value)
@@ -772,14 +867,25 @@ def _set_value(state: GameState, name: str, value, operator: str | None = None) 
             hero.flags[key] = val
     elif name.startswith("switch:"):
         hero.flags[f"switch:{name[7:]}"] = val
-    elif name.startswith("status:money"):
-        hero.gold = int(val) if val is not None else 0
-    elif name.startswith("status:hp"):
-        hero.hp = int(val)
-    elif name.startswith("status:atk"):
-        hero.atk = int(val)
-    elif name.startswith("status:def"):
-        hero.def_ = int(val)
+    elif name.startswith("status:"):
+        stat = name[7:]
+        num = int(val) if isinstance(val, (int, float)) and val is not None else 0
+        if stat == "money":
+            if operator == "+=":   hero.gold += num
+            elif operator == "-=": hero.gold -= num
+            else:                  hero.gold = num
+        elif stat == "hp":
+            if operator == "+=":   hero.hp += num
+            elif operator == "-=": hero.hp -= num
+            else:                  hero.hp = num
+        elif stat == "atk":
+            if operator == "+=":   hero.atk += num
+            elif operator == "-=": hero.atk -= num
+            else:                  hero.atk = num
+        elif stat == "def":
+            if operator == "+=":   hero.def_ += num
+            elif operator == "-=": hero.def_ -= num
+            else:                  hero.def_ = num
 
 
 # ─── autoEvent ───────────────────────────────────────────────────────────────

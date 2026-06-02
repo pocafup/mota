@@ -54,7 +54,9 @@
 | MT10 单层重放真绿 | ✅ 全 148 token 逐格对齐 | b3b12fa |
 | 机制文档 §A–§I（含飞行系统全貌） | ✅ 全部落盘 | 见最新 commit |
 | 机制侦察阶段封板 | ✅ 完成 | 见最新 commit |
-| 跨层模拟器 | ❌ 尚未开始 | — |
+| 跨层模拟器 MT1–MT14 | ✅ 13/13 检查点全PASS，24/24测试全绿 | 本次 commit |
+| 商店/祭坛购买（insert/while/break/CHOICE） | ✅ 通用实现，MT12祭坛+商店验证 | 本次 commit |
+| MT12/MT13/MT14 楼层数据 | ✅ 已提取校验（各0处不一致） | 本次 commit |
 
 **路由起始状态**（来源：`data/games51/hero_init.json`，引擎直读）：
 
@@ -233,7 +235,7 @@ extract/
 
 ---
 
-## 七、13检查点回归状态（2026-06-02 更新，12/13 PASS）
+## 七、13检查点回归状态（2026-06-02 更新，13/13 PASS ✅）
 
 ### 已确认结论
 
@@ -288,9 +290,9 @@ extract/
 | tok[1000] | ✅ PASS | enable修复后转绿（floor=MT10, HP=304, ATK=27） |
 | tok[1100] | ✅ PASS | 连锁转绿 |
 | tok[1200] | ✅ PASS | 连锁转绿 |
-| tok[1300] | ❌ FAIL | floor=MT11（真值MT14）、HP-232、ATK-12；MT12-14数据未提取 |
+| tok[1300] | ✅ PASS | floor=MT14, HP=785, ATK=42, DEF=30（2026-06-02 转绿） |
 
-**总计：12/13 PASS。MT1–MT11 全程逐 token 对齐完毕。tok[1300] FAIL 原因已确认是数据缺失（非bug），留待下个会话补提取 MT12-14 数据。**
+**总计：13/13 PASS。MT1–MT14 全程逐 token 对齐完毕。24/24 回归测试全绿（含 test_checkpoints.py + test_replay_mt1_mt11.py）。**
 
 #### (f) generateMove 异步误判修复（2026-06-02，commit f28ceab）
 
@@ -304,12 +306,34 @@ extract/
 
 **效果**：tok[1300] 从 `floor=MT10` 推进到 `floor=MT11`；原有 12 个 PASS 全部保持，无回归。
 
-#### (g) tok[1300] 剩余偏差（数据缺失，非 bug）
+#### (g) tok[1300] 转绿：MT12-MT14 提取 + 商店/祭坛购买实现（2026-06-02）
 
-- 修复后偏差：`floor=MT11`（真值 `MT14`）、`HP` 少 232、`ATK` 少 12
-- **根因**：MT12.json / MT13.json / MT14.json 尚未提取——`_load_floor_if_needed("MT12")` 返回 False 静默失败，MT11(11,11) 楼梯无法前进，英雄卡在 MT11
-- MT12-14 包含的属性增益（+12 ATK、+232 HP 方向）将在数据提取后自然对齐
-- **下个会话任务**：提取 MT12-14（及后续所需楼层）JSON 数据，流程同 MT1-MT11（源码为准 + 逐格人工校验），才能验证 tok[1300]
+**已提取并校验**：MT12.json / MT13.json / MT14.json，各楼层逐格比对 0 处不一致。
+
+**已实现（simulator.py + common_events.json）**：
+- `insert:"商店"` → 展开公共事件 `商店`（while+choices 循环）
+- `while` / `break` / `CHOICE:n` token 推进选项分支
+- 祭坛 `setValue flag:ratio` + 商店 `setValue +=` 通用实现（按 §D 公式，不硬编码）
+- NPC 交互后英雄坐标移动到 NPC 格（修复旧 bug：hero 卡在相邻格）
+- fly魔杖 MT12→MT13→MT12→MT13→MT14 双弹跳路径正确执行
+
+**tok[1300] 验证值**：floor=MT14, HP=785, ATK=42(30+4×3), DEF=30。
+
+---
+
+## 八、下个会话待办（已知，先别动）
+
+### (a) test_replay_mt10.py — 7个埋伏机关测试可升级
+
+这 7 个测试（`test_ambush_places_specialdoor_at_63` 等）是**早期英雄走不到 MT10 时**改的"隔离测试"（直接构造 MT10 状态，不走完整路由）。现在英雄已能正常经路由走到 MT10，**可考虑升级为真实重放验证**（从 hero_init 起跑完整 route，在对应 token 断言 MT10 埋伏状态）。暂不动，下个会话评估改造成本。
+
+### (b) 解析器 Bug：`M<n>:` 后数字被吞（tok[2200] 后）
+
+已记录于 §七(c)。`M<mapID>:<count>` 格式语义待确认，修复前须先理解含义。影响范围 tok[2200..6138]，当前检查点全部在 tok[1300] 以内，不阻塞。
+
+### (c) 冰冻徽章 snow 机制（模拟器待实现）
+
+机制已记入 `docs/mechanics_51.md §K`（数据来源：源码）。模拟器尚未实现。扩展到 MT35 层时再实现，当前不阻塞。
 
 ---
 

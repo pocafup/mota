@@ -1,0 +1,46 @@
+{
+  "商店": [
+    {
+      "type": "while",
+      "condition": "true",
+      "data": [
+        {
+          "type": "setValue",
+          "name": "flag:money1",
+          "value": "20+10*(flag:times1+1)*flag:times1"
+        },
+        {
+          "type": "choices",
+          "choices": [
+            {
+              "action": [
+                {"type": "setValue", "name": "status:hp",    "value": "100*(flag:times1+1)", "operator": "+="},
+                {"type": "setValue", "name": "status:money", "value": "flag:money1",          "operator": "-="},
+                {"type": "setValue", "name": "flag:times1",  "value": "1",                    "operator": "+="}
+              ]
+            },
+            {
+              "action": [
+                {"type": "setValue", "name": "status:atk",   "value": "2*flag:ratio",         "operator": "+="},
+                {"type": "setValue", "name": "status:money", "value": "flag:money1",          "operator": "-="},
+                {"type": "setValue", "name": "flag:times1",  "value": "1",                    "operator": "+="}
+              ]
+            },
+            {
+              "action": [
+                {"type": "setValue", "name": "status:def",   "value": "4*flag:ratio",         "operator": "+="},
+                {"type": "setValue", "name": "status:money", "value": "flag:money1",          "operator": "-="},
+                {"type": "setValue", "name": "flag:times1",  "value": "1",                    "operator": "+="}
+              ]
+            },
+            {
+              "action": [
+                {"type": "break"}
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

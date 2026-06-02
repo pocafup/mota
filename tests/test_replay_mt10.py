@@ -24,6 +24,7 @@ from sim.combat import Monster, PlayerState, compute_combat
 
 DATA   = Path(__file__).parent.parent / "data" / "games51"
 FLOORS = DATA / "floors"
+FLOOR_IDS = json.loads((DATA / "floorIds.json").read_text(encoding="utf-8"))
 
 # mechanics_51.md §G.3：events["6,5"] 结束后 8 只敌人的最终坐标
 AMBUSH_POS = [(5, 4), (6, 4), (7, 4), (5, 5), (7, 5), (5, 6), (6, 6), (7, 6)]
@@ -45,7 +46,15 @@ def make_initial_state() -> GameState:
         items={},
         flags={"魔法免疫": True},
     )
-    return GameState(hero=hero, floor=floor)
+    return GameState(
+        hero=hero,
+        floors={"MT10": floor},
+        current_floor="MT10",
+        floor_ids=FLOOR_IDS,
+        visited_floors={"MT10"},
+        pending_floor_change=None,
+        _floors_dir=FLOORS,
+    )
 
 
 def load_tokens() -> list:
@@ -185,16 +194,16 @@ def test_full_replay_no_exception():
 
 def test_full_replay_reaches_exit():
     """
-    全程重放后英雄到达 (6,11)——upFloor 楼梯（MT10→MT11 出口）。
-    changeFloor["6,11"] 告知模拟器这是出口，英雄位置应停在此处。
+    全程重放中，英雄踏上 MT10(6,11) 楼梯并切换到 MT11。
+    MT10 trace 中部分 token 属于 MT11 上的首步（旧模拟器靠 _exited 冻结），
+    新模拟器无冻结机制，用 visited_floors 验证 MT11 曾经被访问过。
     """
     tokens = load_tokens()
-    state = make_initial_state()
-    for tok in tokens:
-        state = step(state, tok)
-    assert state.hero.x == 6 and state.hero.y == 11, (
-        f"期望终止于 (6,11)，实际 ({state.hero.x},{state.hero.y})"
+    state, idx = run_until(
+        tokens, make_initial_state(),
+        predicate=lambda s: "MT11" in s.visited_floors,
     )
+    assert idx != -1, "148 个 token 内英雄从未进入 MT11"
 
 
 def test_full_replay_hp_no_decrease():

@@ -1230,6 +1230,114 @@ downFly 不检查 canFlyFrom。从 MT50 的某坐标 (x,y) 向下飞，目标为
 
 ---
 
+## K. 冰魔法（snow）与岩浆通行机制
+
+### K.1 道具定义（来源：`core.material.items['snow']`）
+
+| 字段 | 值 |
+|------|-----|
+| id | `snow` |
+| name | `冰魔法` |
+| cls | `constants` |
+| text | `可冻结熔岩` |
+| canUseItemEffect | `"true"`（始终可使用） |
+| hideInToolbox | `true` |
+| hideInReplay | `true` |
+
+### K.2 道具类型：constants = 永久持有，不消耗
+
+`_afterUseItem`（来源：`core.items._afterUseItem`）：
+
+```js
+function(itemId) {
+  var itemCls = core.material.items[itemId].cls;
+  if (itemCls == "tools") core.status.hero.items[itemCls][itemId]--;  // 只扣 tools
+  if (core.status.hero.items[itemCls][itemId] <= 0)
+    delete core.status.hero.items[itemCls][itemId];
+  core.updateStatusBar();
+}
+```
+
+**结论：`constants` 类道具使用后不被扣数量，snow 可反复使用。**  
+（注意边缘情况：无相邻岩浆时 `useItemEffect` 调用 `core.addItem(itemId, 1)` 会多给 1 个；正常游玩不触发。）
+
+### K.3 获取途径（来源：`core.floors['MT35'].afterBattle['6,7']`）
+
+MT35 位置 (6,7) 有 `magicDragon`，击败后触发：
+```json
+[
+  { "type": "openDoor", "loc": [6, 3] },
+  { "type": "hide",    "loc": [[5,7],[7,7]], "remove": true },
+  { "type": "if", "condition": "flag:开启特性",
+    "true":  [],
+    "false": [
+      { "type": "setBlock", "number": "bluePotion", "loc": [[5,5],[6,5],[7,5]] },
+      { "type": "setBlock", "number": "snow",       "loc": [[6,6]] }
+    ]
+  }
+]
+```
+
+- 条件：`flag:开启特性 = false`（普通模式）时，将 `snow` 道具放置于 MT35(6,6)
+- 英雄踩上 MT35(6,6) 即拾取
+- **全塔唯一来源**（`snowFloors = ["MT35"]`）
+
+### K.4 使用效果（来源：`core.material.items['snow'].useItemEffect`）
+
+```js
+// snowFourDirections = true（四方向模式）
+for (direction of ['up','down','left','right']) {
+  var nx = hero_x + scan[direction].x,
+      ny = hero_y + scan[direction].y;
+  if (core.getBlockId(nx, ny) == 'lava') {
+    core.removeBlock(nx, ny);   // 永久移除该岩浆格，变为空地(tile 0)
+    success = true;
+  }
+}
+```
+
+- 每次使用：移除英雄当前位置四方向所有相邻 `lava`（tile 5）格，最多 4 格
+- 移除后该格变 tile 0（空地），**永久**（不会恢复）
+- 可在任意楼层使用，效果作用于当前楼层
+
+### K.5 岩浆的通行性判断
+
+`core.maps.noPass(x, y)` → `block.event.noPass`：
+- 岩浆（tile 5）：`event.noPass = true` → 英雄无法踏入（`moveAction` 走 noPass 分支，不前进）
+- 被 snow 移除后：`getBlock(x,y) = null` → `noPass = false` → 可通行
+
+**岩浆通行性 = 取决于"该格是否已被 snow 移除"，不是全局 flag。**  
+未移除 → 永远不可通行；已移除 → 永远可通行（空地）。
+
+### K.6 跨层案例：MT13 sword5(6,5)
+
+MT13 地图结构：sword5(43) 在 (6,5)，四周全为墙（tile 1）或岩浆（tile 5）。
+
+拿到 snow 后的到达路径（最短）：
+
+| 步骤 | 英雄位置 | 操作 | 效果 |
+|------|---------|------|------|
+| 0 | (6,11) 走廊 | 开黄门(6,10) | (6,10)变空地 |
+| 1 | (6,10) | 用 snow | 移除(6,9)=岩浆 |
+| 2 | (6,9) | 用 snow | 移除(6,8)(5,9)(7,9)=岩浆 |
+| 3 | (6,8) | 用 snow | 移除(6,7)(5,8)(7,8)=岩浆 |
+| 4 | (6,7) | 用 snow | 移除(6,6)(5,7)=岩浆 |
+| 5 | (6,6) | 北走 | 踩 sword5(6,5)，拾取 |
+
+最少需用 snow 4 次（snow 为 constants，可复用，无问题）。
+
+**结论：sword5 不是纯装饰，拿到 snow 后可达，是后期回来拾取的高价值装备。**
+
+### K.7 对模拟器的影响（待实现，暂不改代码）
+
+1. **岩浆通行判断**：当前模拟器将 tile 5（lava）视为不可通行是正确的（MT1–MT14 期间英雄尚未到 MT35，无 snow）。
+2. **snow 道具行为**：须实现为一种"地图变异动作"——使用时将当前楼层相邻 lava 格从地图移除（tile 5 → tile 0），并更新可达性缓存。
+3. **snow 为 constants 类**：模拟器中不需要消耗该道具的库存（使用后 item count 不减）。
+4. **跨层 sword5**：MT13(6,5) 在玩家拥有 snow 且已清路时可达，须纳入全局路径搜索（但在 MT1–MT14 重放验证中可忽略）。
+5. **架构要求**：岩浆的"不可通行"判断须从 `floors[floorId].map[y][x] == 5`（或对应块的存在性）实时计算，禁止硬编码为永久不可通行。
+
+---
+
 ## J. 未确认项
 
 以下条目标记为**待确认**，禁止在模拟器中假设：
