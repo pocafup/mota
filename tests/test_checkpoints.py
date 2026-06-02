@@ -68,11 +68,20 @@ def _load_tokens():
 
 @pytest.mark.parametrize('token_idx,exp_floor,exp_hp,exp_atk,exp_def,exp_yk,exp_bk', GROUND_TRUTH)
 def test_checkpoint(token_idx, exp_floor, exp_hp, exp_atk, exp_def, exp_yk, exp_bk):
-    """重放到 token_idx，断言 floor/HP/ATK/DEF/yk/bk 与真值一致。"""
+    """重放到 token_idx，断言 floor/HP/ATK/DEF/yk/bk 与真值一致。
+
+    口径说明（禁止改回 tokens[:token_idx]）：
+      玩家的 tok[N] = 执行完第 N 步之后的状态。
+      tokens[0] = CHOICE:1（初始化事件，不计为"步数"），
+      玩家第 N 步对应 tokens[N]（0-indexed），需处理完 tokens[0..N] 共 N+1 个 token。
+      因此正确口径是 tokens[:token_idx + 1]，而非 tokens[:token_idx]。
+      改回 tokens[:token_idx] 会导致每个检查点少跑 1 步、坐标偏 1 格，
+      仅因相邻步无属性变化而碰巧 PASS，一旦跨属性事件边界即暴露（如 tok[500] 血瓶）。
+    """
     tokens = _load_tokens()
     state = _build_initial_state()
 
-    for idx, tok in enumerate(tokens[:token_idx]):
+    for idx, tok in enumerate(tokens[:token_idx + 1]):
         state = step(state, tok)
 
     sim_floor = state.current_floor
