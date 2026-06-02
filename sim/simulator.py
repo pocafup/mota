@@ -297,6 +297,18 @@ def step(state: GameState, action: str) -> GameState:
         _execute_floor_fly(state, action[6:])
         return state
 
+    # 坐标直跳（MOVE:x:y）— h5mota moveDirectly；目标格 BFS 保证无 trigger，不触发任何事件
+    if action.startswith("MOVE:"):
+        parts = action.split(":")
+        nx, ny = int(parts[1]), int(parts[2])
+        if state.hero.flags.get("poison"):
+            # ignoreSteps 近似为曼哈顿距离（真实 BFS 路径若更长则有偏，届时再改）
+            ignore_steps = abs(nx - state.hero.x) + abs(ny - state.hero.y)
+            state.hero.hp -= ignore_steps * 10  # poisonDamage = 10
+        state.hero.x = nx
+        state.hero.y = ny
+        return state
+
     # 道具使用（ITEM:n）— upFly/downFly 等（MT1-MT11 段无此 token，暂为 no-op）
     if action.startswith("ITEM:"):
         _check_auto_events(state)

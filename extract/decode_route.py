@@ -89,6 +89,22 @@ def parse_rle_route(raw: str) -> list[str]:
             actions.append(f'ITEM:{item_id}')
             i = j
 
+        # Direct coordinate jump: M<x>:<y>  →  MOVE:x:y
+        elif c == 'M':
+            i += 1
+            j = i
+            while j < n and raw[j].isdigit():
+                j += 1
+            x = raw[i:j]
+            if j < n and raw[j] == ':':
+                j += 1          # skip ':'
+            k = j
+            while k < n and raw[k].isdigit():
+                k += 1
+            y = raw[j:k]
+            actions.append(f'MOVE:{x}:{y}')
+            i = k
+
         # Unknown alphabetic token + optional digits + optional colon
         elif c.isalpha():
             j = i + 1
