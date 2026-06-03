@@ -1,0 +1,359 @@
+{
+  "MT0": {
+    "canFlyTo": false,
+    "canFlyFrom": true,
+    "flyPoint": null,
+    "underGround": false,
+    "title": "魔塔 地下室"
+  },
+  "MT1": {
+    "canFlyTo": true,
+    "canFlyFrom": true,
+    "flyPoint": null,
+    "underGround": false,
+    "title": "魔塔 第01层"
+  },
+  "MT2": {
+    "canFlyTo": true,
+    "canFlyFrom": true,
+    "flyPoint": null,
+    "underGround": false,
+    "title": "魔塔 第02层"
+  },
+  "MT3": {
+    "canFlyTo": true,
+    "canFlyFrom": true,
+    "flyPoint": null,
+    "underGround": false,
+    "title": "魔塔 第03层"
+  },
+  "MT4": {
+    "canFlyTo": true,
+    "canFlyFrom": true,
+    "flyPoint": null,
+    "underGround": false,
+    "title": "魔塔 第04层"
+  },
+  "MT5": {
+    "canFlyTo": true,
+    "canFlyFrom": true,
+    "flyPoint": null,
+    "underGround": false,
+    "title": "魔塔 第05层"
+  },
+  "MT6": {
+    "canFlyTo": true,
+    "canFlyFrom": true,
+    "flyPoint": null,
+    "underGround": false,
+    "title": "魔塔 第06层"
+  },
+  "MT7": {
+    "canFlyTo": true,
+    "canFlyFrom": true,
+    "flyPoint": null,
+    "underGround": false,
+    "title": "魔塔 第07层"
+  },
+  "MT8": {
+    "canFlyTo": true,
+    "canFlyFrom": true,
+    "flyPoint": null,
+    "underGround": false,
+    "title": "魔塔 第08层"
+  },
+  "MT9": {
+    "canFlyTo": true,
+    "canFlyFrom": true,
+    "flyPoint": null,
+    "underGround": false,
+    "title": "魔塔 第09层"
+  },
+  "MT10": {
+    "canFlyTo": true,
+    "canFlyFrom": true,
+    "flyPoint": null,
+    "underGround": false,
+    "title": "魔塔 第10层"
+  },
+  "MT11": {
+    "canFlyTo": true,
+    "canFlyFrom": true,
+    "flyPoint": null,
+    "underGround": false,
+    "title": "魔塔 第11层"
+  },
+  "MT12": {
+    "canFlyTo": true,
+    "canFlyFrom": true,
+    "flyPoint": null,
+    "underGround": false,
+    "title": "魔塔 第12层"
+  },
+  "MT13": {
+    "canFlyTo": true,
+    "canFlyFrom": true,
+    "flyPoint": null,
+    "underGround": false,
+    "title": "魔塔 第13层"
+  },
+  "MT14": {
+    "canFlyTo": true,
+    "canFlyFrom": true,
+    "flyPoint": null,
+    "underGround": false,
+    "title": "魔塔 第14层"
+  },
+  "MT15": {
+    "canFlyTo": true,
+    "canFlyFrom": true,
+    "flyPoint": null,
+    "underGround": false,
+    "title": "魔塔 第15层"
+  },
+  "MT16": {
+    "canFlyTo": true,
+    "canFlyFrom": true,
+    "flyPoint": null,
+    "underGround": false,
+    "title": "魔塔 第16层"
+  },
+  "MT17": {
+    "canFlyTo": true,
+    "canFlyFrom": true,
+    "flyPoint": null,
+    "underGround": false,
+    "title": "魔塔 第17层"
+  },
+  "MT18": {
+    "canFlyTo": true,
+    "canFlyFrom": true,
+    "flyPoint": null,
+    "underGround": false,
+    "title": "魔塔 第18层"
+  },
+  "MT19": {
+    "canFlyTo": true,
+    "canFlyFrom": true,
+    "flyPoint": null,
+    "underGround": false,
+    "title": "魔塔 第19层"
+  },
+  "MT20": {
+    "canFlyTo": true,
+    "canFlyFrom": true,
+    "flyPoint": null,
+    "underGround": false,
+    "title": "魔塔 第20层"
+  },
+  "MT21": {
+    "canFlyTo": true,
+    "canFlyFrom": true,
+    "flyPoint": null,
+    "underGround": false,
+    "title": "魔塔 第21层"
+  },
+  "MT22": {
+    "canFlyTo": true,
+    "canFlyFrom": true,
+    "flyPoint": null,
+    "underGround": false,
+    "title": "魔塔 第22层"
+  },
+  "MT23": {
+    "canFlyTo": true,
+    "canFlyFrom": true,
+    "flyPoint": null,
+    "underGround": false,
+    "title": "魔塔 第23层"
+  },
+  "MT24": {
+    "canFlyTo": true,
+    "canFlyFrom": true,
+    "flyPoint": null,
+    "underGround": false,
+    "title": "魔塔 第24层"
+  },
+  "MT25": {
+    "canFlyTo": true,
+    "canFlyFrom": true,
+    "flyPoint": null,
+    "underGround": false,
+    "title": "魔塔 第25层"
+  },
+  "MT26": {
+    "canFlyTo": true,
+    "canFlyFrom": true,
+    "flyPoint": null,
+    "underGround": false,
+    "title": "魔塔 第26层"
+  },
+  "MT27": {
+    "canFlyTo": true,
+    "canFlyFrom": true,
+    "flyPoint": null,
+    "underGround": false,
+    "title": "魔塔 第27层"
+  },
+  "MT28": {
+    "canFlyTo": true,
+    "canFlyFrom": true,
+    "flyPoint": null,
+    "underGround": false,
+    "title": "魔塔 第28层"
+  },
+  "MT29": {
+    "canFlyTo": true,
+    "canFlyFrom": true,
+    "flyPoint": null,
+    "underGround": false,
+    "title": "魔塔 第29层"
+  },
+  "MT30": {
+    "canFlyTo": true,
+    "canFlyFrom": true,
+    "flyPoint": null,
+    "underGround": false,
+    "title": "魔塔 第30层"
+  },
+  "MT31": {
+    "canFlyTo": true,
+    "canFlyFrom": true,
+    "flyPoint": null,
+    "underGround": false,
+    "title": "魔塔 第31层"
+  },
+  "MT32": {
+    "canFlyTo": true,
+    "canFlyFrom": true,
+    "flyPoint": null,
+    "underGround": false,
+    "title": "魔塔 第32层"
+  },
+  "MT33": {
+    "canFlyTo": true,
+    "canFlyFrom": true,
+    "flyPoint": null,
+    "underGround": false,
+    "title": "魔塔 第33层"
+  },
+  "MT34": {
+    "canFlyTo": true,
+    "canFlyFrom": true,
+    "flyPoint": null,
+    "underGround": false,
+    "title": "魔塔 第34层"
+  },
+  "MT35": {
+    "canFlyTo": true,
+    "canFlyFrom": true,
+    "flyPoint": null,
+    "underGround": false,
+    "title": "魔塔 第35层"
+  },
+  "MT36": {
+    "canFlyTo": true,
+    "canFlyFrom": true,
+    "flyPoint": null,
+    "underGround": false,
+    "title": "魔塔 第36层"
+  },
+  "MT37": {
+    "canFlyTo": true,
+    "canFlyFrom": true,
+    "flyPoint": null,
+    "underGround": false,
+    "title": "魔塔 第37层"
+  },
+  "MT38": {
+    "canFlyTo": true,
+    "canFlyFrom": true,
+    "flyPoint": null,
+    "underGround": false,
+    "title": "魔塔 第38层"
+  },
+  "MT39": {
+    "canFlyTo": true,
+    "canFlyFrom": true,
+    "flyPoint": null,
+    "underGround": false,
+    "title": "魔塔 第39层"
+  },
+  "MT40": {
+    "canFlyTo": true,
+    "canFlyFrom": true,
+    "flyPoint": null,
+    "underGround": false,
+    "title": "魔塔 第40层"
+  },
+  "MT41": {
+    "canFlyTo": true,
+    "canFlyFrom": true,
+    "flyPoint": null,
+    "underGround": false,
+    "title": "魔塔 第41层"
+  },
+  "MT42": {
+    "canFlyTo": true,
+    "canFlyFrom": true,
+    "flyPoint": null,
+    "underGround": false,
+    "title": "魔塔 第42层"
+  },
+  "MT43": {
+    "canFlyTo": true,
+    "canFlyFrom": true,
+    "flyPoint": null,
+    "underGround": false,
+    "title": "魔塔 第43层"
+  },
+  "MT44": {
+    "canFlyTo": false,
+    "canFlyFrom": true,
+    "flyPoint": null,
+    "underGround": false,
+    "title": "魔塔 第44层"
+  },
+  "MT45": {
+    "canFlyTo": true,
+    "canFlyFrom": true,
+    "flyPoint": null,
+    "underGround": false,
+    "title": "魔塔 第45层"
+  },
+  "MT46": {
+    "canFlyTo": true,
+    "canFlyFrom": true,
+    "flyPoint": null,
+    "underGround": false,
+    "title": "魔塔 第46层"
+  },
+  "MT47": {
+    "canFlyTo": true,
+    "canFlyFrom": true,
+    "flyPoint": null,
+    "underGround": false,
+    "title": "魔塔 第47层"
+  },
+  "MT48": {
+    "canFlyTo": true,
+    "canFlyFrom": true,
+    "flyPoint": null,
+    "underGround": false,
+    "title": "魔塔 第48层"
+  },
+  "MT49": {
+    "canFlyTo": true,
+    "canFlyFrom": true,
+    "flyPoint": null,
+    "underGround": false,
+    "title": "魔塔 第49层"
+  },
+  "MT50": {
+    "canFlyTo": false,
+    "canFlyFrom": false,
+    "flyPoint": null,
+    "underGround": false,
+    "title": "魔塔 第50层"
+  }
+}
