@@ -92,6 +92,8 @@ class FloorState:
     _event_break: bool = False
     # 不可通行地形 tile 集合（数据驱动，来自 tiles.json noPass:true：墙/熔岩/祭坛半格等）
     _no_pass_tiles: set = field(default_factory=set)
+    # NPC tile → trigger 语义（数据驱动，来自 tiles.json npcs.trigger，如 122→"trader"）
+    _tile_to_trigger: dict = field(default_factory=dict)
 
     @property
     def map(self) -> list:
@@ -115,6 +117,7 @@ class GameState:
     pending_floor_change: dict | None  # {"floor_id", "x", "y"} set by changeFloor event
     _floors_dir: Path      # base directory for lazy floor loading
     _common_events: dict = field(default_factory=dict)
+    _merchants: dict = field(default_factory=dict)  # 商人目录缓存 {floorId@x@y: {price, give}}
 
     @property
     def floor(self) -> FloorState:
@@ -163,6 +166,7 @@ def _copy_state(state: GameState) -> GameState:
             after_get_item=f.after_get_item,
             _first_arrive_done=f._first_arrive_done,
             _no_pass_tiles=f._no_pass_tiles,
+            _tile_to_trigger=f._tile_to_trigger,
         )
     return GameState(
         hero=new_hero,
@@ -173,6 +177,7 @@ def _copy_state(state: GameState) -> GameState:
         pending_floor_change=dict(state.pending_floor_change) if state.pending_floor_change else None,
         _floors_dir=state._floors_dir,
         _common_events=state._common_events,
+        _merchants=state._merchants,
     )
 
 
@@ -193,10 +198,13 @@ def load_floor(path: Path) -> FloorState:
     tile_to_entity.update(tile_to_enemy)
     tile_to_entity.update(tile_to_item)
     tile_to_common_event: dict = {}
+    tile_to_trigger: dict = {}
     for k, v in tiles_db.get("npcs", {}).items():
         tile_to_entity[int(k)] = v["id"]
         if "_commonEvent" in v:
             tile_to_common_event[int(k)] = v["_commonEvent"]
+        if "trigger" in v:
+            tile_to_trigger[int(k)] = v["trigger"]
 
     id_to_tile = {v: int(k) for k, v in tile_to_entity.items()}
 
@@ -249,6 +257,7 @@ def load_floor(path: Path) -> FloorState:
         first_arrive=data.get("firstArrive", []),
         after_get_item=data.get("afterGetItem", {}),
         _no_pass_tiles=no_pass_tiles,
+        _tile_to_trigger=tile_to_trigger,
     )
 
 
@@ -434,7 +443,11 @@ def _process_move(state: GameState, direction: str) -> None:
         if ev is not None:
             _fire_events(state, nx, ny)
             return
-        # 无楼层事件 → 查 NPC 的 common event（如商店/祭坛），数据来自 tiles.json._commonEvent
+        # trader 商人（trigger=trader）：独立于祭坛，首次买(choices)/二次对话消失，全程不移入
+        if floor._tile_to_trigger.get(e_tile) == "trader":
+            _handle_trader(state, nx, ny)
+            return
+        # 无楼层事件 → 查 NPC 的 common event（如祭坛），数据来自 tiles.json._commonEvent
         ce_name = floor._tile_to_common_event.get(e_tile)
         if ce_name:
             body = _get_common_events(state).get(ce_name)
@@ -464,6 +477,57 @@ def _process_move(state: GameState, direction: str) -> None:
 
     hero.x, hero.y = nx, ny
     _fire_events(state, nx, ny)
+
+
+# ─── Trader (商人) ─────────────────────────────────────────────────────────────
+
+def _get_merchants(state: GameState) -> dict:
+    """惰性加载 shops.json 商人目录 → {floorId@x@y: {price, give}}。"""
+    if not state._merchants:
+        path = state._floors_dir.parent / "shops.json"
+        if path.exists():
+            shops = json.loads(path.read_text(encoding="utf-8"))
+            for entry in shops.get("merchants", {}).get("items", []):
+                fl, pos = entry.get("floor"), entry.get("pos")
+                if not fl or not pos:
+                    continue
+                px, py = pos.split(",")
+                state._merchants[f"{fl}@{int(px)}@{int(py)}"] = {
+                    "price": entry.get("price", 0),
+                    "give": entry.get("give", {}),
+                }
+        state._merchants.setdefault("__loaded__", {})  # 空目录也不再反复读盘
+    return state._merchants
+
+
+def _handle_trader(state: GameState, x: int, y: int) -> None:
+    """商人(trader 122)交互。来源 systemEvents.trader + commonEvent 商人/对话。
+    首次：挂 choices 拦截[我太需要了/下次再说]，由下个 CHOICE token 决定买否；
+    二次(flag 已置)：对话→商人消失(hide remove)。全程英雄不移入。"""
+    floor = state.floor
+    hero = state.hero
+    flag_key = f"{floor.floor_id}@{x}@{y}@A"
+    if hero.flags.get(flag_key, 0) == 1:
+        floor.entities[y][x] = 0                       # 第2次交互 → 商人消失
+        floor._suppressed_events.add(f"{x},{y}")
+        return
+    catalog = _get_merchants(state).get(f"{floor.floor_id}@{x}@{y}")
+    if catalog is None:
+        return  # 未在 shops.json 声明的商人 → 待建模，不静默买卖（铁律：绝不猜测）
+    price = catalog["price"]
+    buy_action: list = [
+        {"type": "setValue", "name": "status:money", "value": str(price), "operator": "-="}
+    ]
+    for item_id, cnt in catalog["give"].items():
+        buy_action.append({"type": "giveItem", "id": item_id, "count": cnt})
+    buy_action.append({"type": "setValue", "name": f"flag:{flag_key}", "value": "1"})
+    # 金币不足整体不买（对照 systemEvents: if money>=price …else 金币不够）
+    guarded = [{"type": "if", "condition": f"status:money>={price}",
+                "true": buy_action, "false": []}]
+    floor._event_intercepting = True
+    floor._event_pending_choices = [{"action": guarded}, {"action": []}]
+    floor._event_pending_instrs = []
+    floor._event_pending_xy = (x, y)
 
 
 # ─── Combat ──────────────────────────────────────────────────────────────────
@@ -749,6 +813,19 @@ def _execute_instruction(
     if t == "setValue":
         _set_value(state, instr.get("name", ""), instr.get("value", ""),
                    instr.get("operator"))
+        return
+
+    # ── giveItem（通用给道具：路由 钥匙/hp/其它道具，供商人等使用）─────────────
+    if t == "giveItem":
+        item_id = instr.get("id", "")
+        cnt = int(instr.get("count", 1))
+        hero = state.hero
+        if item_id in _KEY_ITEMS:
+            hero.keys[item_id] = hero.keys.get(item_id, 0) + cnt
+        elif item_id == "hp":
+            hero.hp += cnt
+        else:
+            hero.items[item_id] = hero.items.get(item_id, 0) + cnt
         return
 
     # ── changeFloor ───────────────────────────────────────────────────────────

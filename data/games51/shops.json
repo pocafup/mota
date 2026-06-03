@@ -56,5 +56,25 @@
       {"floor": "MT12", "pos": "11,1", "buy": "yellowKey",  "cost_gold": 1000,
        "_note": "条件：switch:A=true（由事件触发解锁）"}
     ]
+  },
+  "merchants": {
+    "_source": "project.min.js: blocksInfo[122]{trigger:'trader'} + core.events.systemEvents.trader + commonEvent '商人'/'对话'。商人(trader 122) 与祭坛(blueShop 131) 是两套独立脚本。",
+    "_mechanism": {
+      "tile": 122,
+      "trigger": "trader",
+      "flag_key": "{floorId}@{x}@{y}@A",
+      "first_interaction": "systemEvents.trader 见 flag!=1 → insert '商人'：choices ['我太需要了','下次再说']。选0且 金币>=price：金币-=price、给 give 道具、setFlag(flag_key,1)；金币不够则不买。选1无事。",
+      "second_interaction": "flag==1 → insert '对话'：显示对话后 {hide loc remove:true} → 商人消失(setBlock 0)。",
+      "no_move": "全程英雄不移入商人格（与老人/小偷 NPC 一致），买与对话各占 1 个 token。",
+      "distinct_from_altar": "祭坛=同格 while 循环多次加属性(times1 涨价)；商人=单次卖固定道具后消失。两者不共用 commonEvent。"
+    },
+    "items": [
+      {"floor": "MT6",  "pos": "8,4",   "price": 50,   "give": {"blueKey": 1},   "_text": "我有一把兰钥匙你出50个金币就卖给你。"},
+      {"floor": "MT7",  "pos": "6,1",   "price": 50,   "give": {"yellowKey": 5}},
+      {"floor": "MT12", "pos": "1,1",   "price": 800,  "give": {"redKey": 1}},
+      {"floor": "MT15", "pos": "11,11", "price": 200,  "give": {"blueKey": 1}},
+      {"_note": "以下楼层在 '商人' commonEvent 的 switch(楼层号) 中声明，但楼层尚未提取(当前仅到 MT20)，待提取时落盘并验证：MT31 price1000 give{yellowKey:4,blueKey:1} / MT38 price200 give{yellowKey:3} / MT39 price2000 give{blueKey:3} / MT45 price1000 give{hp:2000} / MT47 price4000 give{earthquake:1}。default: '没有本层商人信息'(无交易)。",
+       "floor": null}
+    ]
   }
 }
