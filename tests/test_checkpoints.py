@@ -32,6 +32,10 @@ GROUND_TRUTH = [
     (1100, 'MT1',   546, 27, 27, None, None),
     (1200, 'MT10',  510, 27, 27, None, None),
     (1300, 'MT14',  785, 42, 30, None, None),
+    (1400, 'MT6',   545, 42, 30,  2, None),
+    (1500, 'MT3',   459, 64, 32,  1, None),
+    (1603, 'MT11',  599, 64, 52,  4, None),
+    (2000, 'MT16',  618, 72, 56,  0,    0),
 ]
 
 MAX_TOKEN = max(t for t, *_ in GROUND_TRUTH)

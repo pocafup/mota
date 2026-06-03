@@ -139,15 +139,16 @@
     "248": {"id":"octopus","_monster":"octopus"},
     "249": {"id":"evilBat","_monster":"evilBat"},
     "250": {"id":"redWizardRepulse","_monster":"redWizardRepulse"},
-    "251": {"id":"steelGuard","_monster":"steelGuard"}
+    "251": {"id":"steelGuard","_monster":"steelGuard"},
+    "258": {"id":"steelRock","_monster":"steelRock","_note":"高级石头人（MT15 boss，需矿镐或高ATK击杀）"}
   },
 
   "npcs": {
     "121": {"id":"oldman","name":"老人","_note":"老人 NPC"},
-    "122": {"id":"trader","name":"商人","_note":"普通商人 NPC"},
+    "122": {"id":"trader","name":"商人","_commonEvent":"商店","_note":"普通商人 NPC"},
     "123": {"id":"thief","name":"小偷","_note":"小偷 NPC（MT2 越狱场景）"},
     "124": {"id":"specialTrader","name":"商人","_note":"特殊商人 NPC（MT2 祝福事件）"},
     "127": {"id":"king","name":"作者","_note":"作者变更日志 NPC（MT1 版本历史事件）"},
-    "131": {"id":"blueShop","name":"祭坛","_note":"祭坛 NPC，触发 '商店' 事件（见 shops.json）"}
+    "131": {"id":"blueShop","name":"祭坛","_commonEvent":"商店","_note":"祭坛 NPC，触发 '商店' 事件（见 shops.json）"}
   }
 }

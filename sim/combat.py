@@ -73,11 +73,15 @@ def _has(special: List[int], n: int) -> bool:
     return n in special
 
 
+_CROSS_ENEMIES = {"zombie", "zombieKnight", "vampire"}
+
+
 def compute_combat(
     hero: PlayerState,
     enemy: Monster,
     extra_turn: int = 0,
     hatred: int = 0,
+    has_cross: bool = False,
 ) -> CombatResult:
     """
     Pure implementation of getEnemyInfo + getDamageInfo + post-combat effects.
@@ -89,8 +93,15 @@ def compute_combat(
     enemy      : base enemy stats (光环/支援 adjustments applied by caller if needed)
     extra_turn : value of flag __extraTurn__ (guard system; 0 in normal combat)
     hatred     : value of flag hatred (accumulated from prior kills; for special 17)
+    has_cross  : hero holds cross item (doubles ATK vs zombie/zombieKnight/vampire)
     """
     sp = enemy.special
+
+    # ── cross: double ATK against undead/vampire ─────────────────────────────
+    # Source: getDamageInfo → hasItem("cross") && [...].indexOf(enemy.id) >= 0 → hero_atk *= 2
+    hero_atk = hero.atk
+    if has_cross and enemy.id in _CROSS_ENEMIES:
+        hero_atk *= 2
 
     # ── getEnemyInfo: 模仿(10) and 坚固(3) ──────────────────────────────────
     mon_hp = enemy.hp
@@ -98,14 +109,14 @@ def compute_combat(
     mon_def = enemy.def_
 
     if _has(sp, 10):  # 模仿: copy hero ATK/DEF
-        mon_atk = hero.atk
+        mon_atk = hero_atk
         mon_def = hero.def_
 
-    if _has(sp, 3) and mon_def < hero.atk - 1:  # 坚固: floor hero_per at 1
-        mon_def = hero.atk - 1
+    if _has(sp, 3) and mon_def < hero_atk - 1:  # 坚固: floor hero_per at 1
+        mon_def = hero_atk - 1
 
-    # ── 无敌(20) ─────────────────────────────────────────────────────────────
-    if _has(sp, 20):
+    # ── 无敌(20)：本游戏无怪物有此属性；cross 持有时应可突破，但实际无影响 ─────
+    if _has(sp, 20) and not has_cross:
         return CombatResult(damage=None)
 
     # ── init_damage ──────────────────────────────────────────────────────────
@@ -130,7 +141,7 @@ def compute_combat(
     # ── counter_damage (per turn, triggered by hero's attack) ────────────────
     counter_damage = 0
     if _has(sp, 8):
-        counter_damage = math.floor((enemy.atkValue or 0.1) * hero.atk)
+        counter_damage = math.floor((enemy.atkValue or 0.1) * hero_atk)
 
     # ── init_damage adjustments ──────────────────────────────────────────────
     if _has(sp, 1):  # 先攻: monster attacks once before hero's first strike
@@ -141,7 +152,7 @@ def compute_combat(
         init_damage += math.floor((enemy.n or 3) * hero.mdef)
 
     # ── killability check ────────────────────────────────────────────────────
-    hero_per_damage = max(0, hero.atk - mon_def)
+    hero_per_damage = max(0, hero_atk - mon_def)
     if hero_per_damage == 0:
         return CombatResult(damage=None)
 

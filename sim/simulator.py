@@ -21,6 +21,8 @@ from sim.combat import Monster, PlayerState, compute_combat
 
 WALL_TILES = {1, 4, 5, 330}
 SPECIAL_DOOR = 85
+# fakeWall(2) 和 fakeWall2(3)：trigger="openDoor",keys={}，踩上自动开门，触发 afterOpenDoor
+AUTO_OPEN_TILES = {2, 3}
 DOOR_KEY_MAP = {
     81: "yellowKey", 82: "blueKey", 83: "redKey",
     84: "greenKey", 86: "steelKey",
@@ -31,7 +33,10 @@ _DOOR_ID_TO_TILE = {
     "unbreakableWall": 330,
 }
 _DIR = {"U": (0, -1), "D": (0, 1), "L": (-1, 0), "R": (1, 0)}
-_MOVE_DIR = {"up": (0, -1), "down": (0, 1), "left": (-1, 0), "right": (1, 0)}
+_MOVE_DIR = {
+    "up": (0, -1), "down": (0, 1), "left": (-1, 0), "right": (1, 0),
+    "rightdown": (1, 1), "leftdown": (-1, 1), "rightup": (1, -1), "leftup": (-1, -1),
+}
 _KEY_ITEMS = {"yellowKey", "blueKey", "redKey", "greenKey", "steelKey", "bigKey"}
 
 
@@ -59,15 +64,17 @@ class FloorState:
     entities: list      # list[list[int]] 实体层：怪/道具/NPC（0=空）
     ratio: int
     events: dict        # shared reference (read-only after load)
-    after_battle: dict  # shared reference
-    auto_event: dict    # shared reference
+    after_battle: dict      # shared reference
+    after_open_door: dict   # shared reference
+    auto_event: dict        # shared reference
     change_floor: dict  # shared reference
     _items_db: dict     # shared reference
     _monsters_db: dict  # shared reference
     _tile_to_enemy: dict    # {tile_int: monster_id}
     _tile_to_item: dict     # {tile_int: item_id}
-    _tile_to_entity: dict   # {tile_int: entity_id} (enemies + items + npcs)
-    _id_to_tile: dict       # {entity_id: tile_int}
+    _tile_to_entity: dict        # {tile_int: entity_id} (enemies + items + npcs)
+    _id_to_tile: dict            # {entity_id: tile_int}
+    _tile_to_common_event: dict  # {tile_int: common_event_name} for NPC tiles
     _suppressed_events: set  # loc keys where hide+remove fired; also autoEvent once-keys
     _done_after_battle: set  # loc keys where afterBattle already ran
     # 拦截型事件状态
@@ -131,6 +138,7 @@ def _copy_state(state: GameState) -> GameState:
             ratio=f.ratio,
             events=f.events,
             after_battle=f.after_battle,
+            after_open_door=f.after_open_door,
             auto_event=f.auto_event,
             change_floor=f.change_floor,
             _items_db=f._items_db,
@@ -139,6 +147,7 @@ def _copy_state(state: GameState) -> GameState:
             _tile_to_item=f._tile_to_item,
             _tile_to_entity=f._tile_to_entity,
             _id_to_tile=f._id_to_tile,
+            _tile_to_common_event=f._tile_to_common_event,
             _suppressed_events=set(f._suppressed_events),
             _done_after_battle=set(f._done_after_battle),
             _event_intercepting=f._event_intercepting,
@@ -180,8 +189,11 @@ def load_floor(path: Path) -> FloorState:
     tile_to_entity: dict = {}
     tile_to_entity.update(tile_to_enemy)
     tile_to_entity.update(tile_to_item)
+    tile_to_common_event: dict = {}
     for k, v in tiles_db.get("npcs", {}).items():
         tile_to_entity[int(k)] = v["id"]
+        if "_commonEvent" in v:
+            tile_to_common_event[int(k)] = v["_commonEvent"]
 
     id_to_tile = {v: int(k) for k, v in tile_to_entity.items()}
 
@@ -205,6 +217,7 @@ def load_floor(path: Path) -> FloorState:
         ratio=data.get("ratio", 1),
         events=data.get("events", {}),
         after_battle=data.get("afterBattle", {}),
+        after_open_door=data.get("afterOpenDoor", {}),
         auto_event=data.get("autoEvent", {}),
         change_floor=data.get("changeFloor", {}),
         _items_db=items_db,
@@ -213,6 +226,7 @@ def load_floor(path: Path) -> FloorState:
         _tile_to_item=tile_to_item,
         _tile_to_entity=tile_to_entity,
         _id_to_tile=id_to_tile,
+        _tile_to_common_event=tile_to_common_event,
         _suppressed_events=set(),
         _done_after_battle=set(),
         down_floor=data.get("downFloor"),
@@ -405,8 +419,15 @@ def _process_move(state: GameState, direction: str) -> None:
             _fire_events(state, nx, ny)
             hero.x, hero.y = nx, ny
             return
-        # 无楼层事件的 NPC（老人/商人等）→ 交互为 no-op：hero 停在原格
-        # 路线中 CHOICE token 若随后到来，在非拦截状态下也是 no-op，不影响重放
+        # 无楼层事件 → 查 NPC 的 common event（如商店/祭坛），数据来自 tiles.json._commonEvent
+        ce_name = floor._tile_to_common_event.get(e_tile)
+        if ce_name:
+            body = _get_common_events(state).get(ce_name)
+            if body is not None:
+                _execute_event_list(state, body, nx, ny)
+            hero.x, hero.y = nx, ny
+            return
+        # 完全无事件的 NPC（老人等）→ hero 停在原格
         return
 
     if t_tile in DOOR_KEY_MAP:
@@ -415,6 +436,21 @@ def _process_move(state: GameState, direction: str) -> None:
             hero.keys[key_id] -= 1
             floor.terrain[ny][nx] = 0
             # 英雄不移入门格，下一个同向 token 走入（h5mota 引擎行为）
+        return
+
+    if t_tile in AUTO_OPEN_TILES:
+        # fakeWall/fakeWall2：踩上自动开门，触发 afterOpenDoor，可能 setBlock 道具
+        floor.terrain[ny][nx] = 0
+        aod_key = f"{nx},{ny}"
+        aod = floor.after_open_door.get(aod_key)
+        if aod:
+            _execute_event_list(state, aod, nx, ny)
+        # afterOpenDoor 可能通过 setBlock 在此格放了道具
+        new_e = floor.entities[ny][nx]
+        if new_e in floor._tile_to_item:
+            _pickup_item(state, nx, ny)
+        hero.x, hero.y = nx, ny
+        _fire_events(state, nx, ny)
         return
 
     hero.x, hero.y = nx, ny
@@ -443,7 +479,8 @@ def _fight_monster(state: GameState, mx: int, my: int) -> None:
         defValue=m.get("defValue", 0.9), damage=m.get("damage", 0),
     )
     hero_ps = PlayerState(hp=hero.hp, atk=hero.atk, def_=hero.def_, mdef=hero.mdef)
-    result = compute_combat(hero_ps, monster)
+    has_cross = hero.items.get("cross", 0) > 0
+    result = compute_combat(hero_ps, monster, has_cross=has_cross)
 
     if result.damage is None:
         return
