@@ -144,7 +144,7 @@
   },
 
   "npcs": {
-    "121": {"id":"oldman","name":"老人","_note":"老人 NPC"},
+    "121": {"id":"oldman","name":"老人","trigger":"oldman","_note":"老人 NPC。trigger=oldman(来源 blocksInfo[121].trigger)：撞→systemEvents.oldman→insert 公共事件'对话'(args=[楼层号,x,y,0])，对话末尾 hide[x,y] remove 老人消失、英雄不移入；按楼层号 switch 分支(MT2 case2 给1000金币/MT3 case3 给怪物手册book/MT18 等为纯提示无奖励)"},
     "122": {"id":"trader","name":"商人","trigger":"trader","_note":"普通商人 NPC。trigger=trader(来源 blocksInfo[122].trigger)：撞→首次买(目录见 shops.json merchants)/二次对话商人消失，不移入；不共用祭坛(131)的'商店'commonEvent"},
     "123": {"id":"thief","name":"小偷","_note":"小偷 NPC（MT2 越狱场景）"},
     "124": {"id":"specialTrader","name":"商人","_note":"特殊商人 NPC（MT2 祝福事件）"},

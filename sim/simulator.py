@@ -447,6 +447,12 @@ def _process_move(state: GameState, direction: str) -> None:
         if floor._tile_to_trigger.get(e_tile) == "trader":
             _handle_trader(state, nx, ny)
             return
+        # oldman 老人（trigger=oldman）：撞→systemEvents.oldman→insert"对话"(args=[楼层号,x,y,0])
+        # →按楼层 case 显示提示(MT2 给1000金币/MT3 给手册/MT18 等纯提示)→末尾 hide[x,y] remove
+        # 老人消失；英雄不移入(撞 NPC)，需再按一次走入(与 trader/MT16 老人统一)
+        if floor._tile_to_trigger.get(e_tile) == "oldman":
+            _handle_oldman(state, nx, ny)
+            return
         # 无楼层事件 → 查 NPC 的 common event（如祭坛），数据来自 tiles.json._commonEvent
         ce_name = floor._tile_to_common_event.get(e_tile)
         if ce_name:
@@ -530,6 +536,18 @@ def _handle_trader(state: GameState, x: int, y: int) -> None:
     floor._event_pending_xy = (x, y)
 
 
+def _handle_oldman(state: GameState, x: int, y: int) -> None:
+    """老人(oldman 121)交互。忠实 systemEvents.oldman：
+    core.insertAction([{type:insert, name:'对话', args:[楼层号,x,y,0]}])。
+    '对话' commonEvent 按 flag:arg1(楼层号) switch 显示提示(MT2 给1000金币/MT3 给手册/
+    其余纯提示)，末尾 hide loc=[arg2,arg3] remove → 老人消失。英雄不移入(撞 NPC)，
+    需下个同向 token 才走入。MT2/MT3 因 '有选择的对话'=true 会挂 choices 拦截(等 CHOICE
+    token)；其余层为纯文字串(had_sync_anim=False → 跳过、不拦截、不消费额外 token)。"""
+    floor_num = int(state.current_floor[2:])  # MT18→18，同引擎 floorId.substring(2)
+    instr = {"type": "insert", "name": "对话", "args": [floor_num, x, y, 0]}
+    _execute_instruction(state, instr, x, y, {"had_sync_anim": False})
+
+
 # ─── Combat ──────────────────────────────────────────────────────────────────
 
 def _fight_monster(state: GameState, mx: int, my: int) -> None:
@@ -556,6 +574,12 @@ def _fight_monster(state: GameState, mx: int, my: int) -> None:
     result = compute_combat(hero_ps, monster, has_cross=has_cross)
 
     if result.damage is None:
+        return
+
+    # 引擎 canBattle 规则(core.enemys.canBattle: damage != null && damage < hp)：
+    # 须 damage < hp 才可战斗；damage >= hp(战后 HP≤0)会死 → events.battle 拦截，
+    # 不战斗、英雄原地不动(等同撞墙/noPass，这步无效，HP/坐标/钥匙/金币全不变)。
+    if result.damage >= hero.hp:
         return
 
     hero.hp -= result.damage
@@ -719,6 +743,22 @@ def _run_while_body(
         floor._event_pending_instrs = [sentinel] + floor._event_pending_instrs
 
 
+def _norm_loc_pairs(loc_param, state: GameState) -> list:
+    """规整 hide/show 的 loc，兼容两种 h5mota 写法：
+      嵌套 [[x,y],[x,y],...]（多点，现有数据用）/ 扁平 [x,y]（单点，公共事件'对话'用）。
+    每个坐标分量可为整数，或 flag:/status: 表达式字符串（如 '对话'的 ['flag:arg2 ','flag:arg3 ']），
+    后者用 _eval_value_expr 求值。"""
+    if not loc_param:
+        return []
+    pairs = loc_param if isinstance(loc_param[0], (list, tuple)) else [loc_param]
+    out = []
+    for p in pairs:
+        x = p[0] if isinstance(p[0], int) else _eval_value_expr(str(p[0]), state)
+        y = p[1] if isinstance(p[1], int) else _eval_value_expr(str(p[1]), state)
+        out.append((int(x), int(y)))
+    return out
+
+
 def _execute_instruction(
     state: GameState, instr: dict, event_x: int, event_y: int,
     ctx: dict | None = None,
@@ -754,18 +794,14 @@ def _execute_instruction(
             # 跨层 hide：仅当目标层已加载时应用
             if target_fid in state.floors:
                 tf = state.floors[target_fid]
-                loc_param = instr.get("loc")
-                if loc_param is not None:
-                    for loc in loc_param:
-                        lx, ly = loc[0], loc[1]
-                        if instr.get("remove"):
-                            tf._suppressed_events.add(f"{lx},{ly}")
-                        tf.entities[ly][lx] = 0
+                for lx, ly in _norm_loc_pairs(instr.get("loc"), state):
+                    if instr.get("remove"):
+                        tf._suppressed_events.add(f"{lx},{ly}")
+                    tf.entities[ly][lx] = 0
             return
         loc_param = instr.get("loc")
         if loc_param is not None:
-            for loc in loc_param:
-                lx, ly = loc[0], loc[1]
+            for lx, ly in _norm_loc_pairs(loc_param, state):
                 if instr.get("remove"):
                     floor._suppressed_events.add(f"{lx},{ly}")
                 floor.entities[ly][lx] = 0   # 清除实体（NPC/怪/道具）
@@ -876,11 +912,37 @@ def _execute_instruction(
         _execute_event_list(state, branch, event_x, event_y, ctx)
         return
 
+    # ── switch / caseList ─────────────────────────────────────────────────────
+    if t == "switch":
+        val = _eval_value_expr(instr.get("condition", ""), state)
+        chosen = None
+        default_action = None
+        for c in instr.get("caseList", []):
+            cv = c.get("case")
+            if cv == "default":
+                default_action = c.get("action", [])
+            elif str(cv) == str(val):
+                chosen = c.get("action", [])
+                break
+        action = chosen if chosen is not None else (default_action or [])
+        _execute_event_list(state, action, event_x, event_y, ctx)
+        # switch 内的 break(如 default 的 break n:1) 只为结束本 switch，不外泄
+        if floor._event_break:
+            floor._event_break = False
+        return
+
     # ── insert ────────────────────────────────────────────────────────────────
     if t == "insert":
         name = instr.get("name", "")
         body = _get_common_events(state).get(name)
         if body is not None:
+            args = instr.get("args")
+            if args is not None:
+                # h5mota: insert args → flag:arg1..argN(1-indexed)。用完保留(不恢复)：
+                # 残留 argN 仅被公共事件读取，对其它逻辑无害；且 choices 拦截后续跑时
+                # pending 指令(如 hide loc=[arg2,arg3])仍需读到这些 flag。
+                for i, a in enumerate(args, start=1):
+                    state.hero.flags[f"arg{i}"] = a
             _execute_event_list(state, body, event_x, event_y, ctx)
         return
 
