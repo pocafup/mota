@@ -90,6 +90,8 @@ class FloorState:
     after_get_item: dict = field(default_factory=dict)
     _first_arrive_done: bool = False
     _event_break: bool = False
+    # 不可通行地形 tile 集合（数据驱动，来自 tiles.json noPass:true：墙/熔岩/祭坛半格等）
+    _no_pass_tiles: set = field(default_factory=set)
 
     @property
     def map(self) -> list:
@@ -160,6 +162,7 @@ def _copy_state(state: GameState) -> GameState:
             first_arrive=f.first_arrive,
             after_get_item=f.after_get_item,
             _first_arrive_done=f._first_arrive_done,
+            _no_pass_tiles=f._no_pass_tiles,
         )
     return GameState(
         hero=new_hero,
@@ -197,6 +200,18 @@ def load_floor(path: Path) -> FloorState:
 
     id_to_tile = {v: int(k) for k, v in tile_to_entity.items()}
 
+    # 数据驱动收集不可通行地形 tile（tiles.json 任意段中 noPass:true 且非实体）。
+    # 取代仅靠硬编码 WALL_TILES：祭坛半格(7/8)等塔特有装饰墙由数据声明。
+    no_pass_tiles: set = set()
+    for entries in tiles_db.values():
+        if not isinstance(entries, dict):
+            continue
+        for k, v in entries.items():
+            if isinstance(v, dict) and v.get("noPass") is True:
+                tid = int(k)
+                if tid not in tile_to_entity:
+                    no_pass_tiles.add(tid)
+
     raw_map = data["map"]
     H = len(raw_map)
     W = len(raw_map[0]) if H else 0
@@ -233,6 +248,7 @@ def load_floor(path: Path) -> FloorState:
         up_floor=data.get("upFloor"),
         first_arrive=data.get("firstArrive", []),
         after_get_item=data.get("afterGetItem", {}),
+        _no_pass_tiles=no_pass_tiles,
     )
 
 
@@ -395,7 +411,7 @@ def _process_move(state: GameState, direction: str) -> None:
     t_tile = floor.terrain[ny][nx]
     e_tile = floor.entities[ny][nx]
 
-    if t_tile in WALL_TILES or t_tile == SPECIAL_DOOR:
+    if t_tile in WALL_TILES or t_tile in floor._no_pass_tiles or t_tile == SPECIAL_DOOR:
         return
 
     if e_tile in floor._tile_to_enemy:
@@ -414,10 +430,9 @@ def _process_move(state: GameState, direction: str) -> None:
         if isinstance(ev, dict) and ev.get("enable") is False:
             hero.x, hero.y = nx, ny
             return
-        # 有激活事件（如商店/小偷列表事件）→ 触发后 hero 移入 NPC 格（h5mota 引擎先移位再触发事件）
+        # 有激活事件（如商店/小偷列表事件）→ NPC 为 noPass，触发互动后 hero 不移入，需再按一次走入
         if ev is not None:
             _fire_events(state, nx, ny)
-            hero.x, hero.y = nx, ny
             return
         # 无楼层事件 → 查 NPC 的 common event（如商店/祭坛），数据来自 tiles.json._commonEvent
         ce_name = floor._tile_to_common_event.get(e_tile)
@@ -425,7 +440,6 @@ def _process_move(state: GameState, direction: str) -> None:
             body = _get_common_events(state).get(ce_name)
             if body is not None:
                 _execute_event_list(state, body, nx, ny)
-            hero.x, hero.y = nx, ny
             return
         # 完全无事件的 NPC（老人等）→ hero 停在原格
         return
@@ -439,18 +453,13 @@ def _process_move(state: GameState, direction: str) -> None:
         return
 
     if t_tile in AUTO_OPEN_TILES:
-        # fakeWall/fakeWall2：踩上自动开门，触发 afterOpenDoor，可能 setBlock 道具
+        # fakeWall/fakeWall2：撞上自动开门(墙→空地)，触发 afterOpenDoor；英雄不移入，
+        # 下一同向 token 才走入(届时若 afterOpenDoor setBlock 了道具则按拾取分支取)，与钥匙门一致
         floor.terrain[ny][nx] = 0
         aod_key = f"{nx},{ny}"
         aod = floor.after_open_door.get(aod_key)
         if aod:
             _execute_event_list(state, aod, nx, ny)
-        # afterOpenDoor 可能通过 setBlock 在此格放了道具
-        new_e = floor.entities[ny][nx]
-        if new_e in floor._tile_to_item:
-            _pickup_item(state, nx, ny)
-        hero.x, hero.y = nx, ny
-        _fire_events(state, nx, ny)
         return
 
     hero.x, hero.y = nx, ny

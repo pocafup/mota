@@ -18,8 +18,8 @@
     "87":  {"id":"upFloor","noPass":false,"_note":"上楼梯（进入下一楼层）"},
     "88":  {"id":"downFloor","noPass":false,"_note":"下楼梯（进入上一楼层）"},
     "6":   {"id":"ice","_note":"冰面地形"},
-    "7":   {"id":"blueShop-left","_note":"祭坛左半格（视觉）"},
-    "8":   {"id":"blueShop-right","_note":"祭坛右半格（视觉）"},
+    "7":   {"id":"blueShop-left","noPass":true,"_note":"祭坛左半格（碰撞，不可通行；玩家实测祭坛碰撞为3格7/131/8，仅中间131下方可加点）"},
+    "8":   {"id":"blueShop-right","noPass":true,"_note":"祭坛右半格（碰撞，不可通行；同上）"},
     "321": {"id":"whiteWall2","noPass":false,"_note":"白色装饰地形，可通行"},
     "17":  {"id":"_unknown_visual","noPass":false,"_note":"blocksInfo 无记录，引擎视为可通行地板；MT10 埋伏触发时 setBlock 0 清除"}
   },
