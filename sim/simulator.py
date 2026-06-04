@@ -94,6 +94,9 @@ class FloorState:
     _no_pass_tiles: set = field(default_factory=set)
     # NPC tile → trigger 语义（数据驱动，来自 tiles.json npcs.trigger，如 122→"trader"）
     _tile_to_trigger: dict = field(default_factory=dict)
+    # 全量 id→tile（覆盖 walls/terrains/animates/items/enemys/npcs）：
+    # 供 setBlock 字符串 number（如 "specialDoor"/"yellowWall"）与 searchBlock 反查。见 mechanics §M.5/M.6
+    _id_to_tile_full: dict = field(default_factory=dict)
 
     @property
     def map(self) -> list:
@@ -118,6 +121,8 @@ class GameState:
     _floors_dir: Path      # base directory for lazy floor loading
     _common_events: dict = field(default_factory=dict)
     _merchants: dict = field(default_factory=dict)  # 商人目录缓存 {floorId@x@y: {price, give}}
+    # setEnemy 临时改怪：{monster_id: {attr: value}}。special 存为 list（见 mechanics §M.1/M.4）
+    _enemy_overrides: dict = field(default_factory=dict)
 
     @property
     def floor(self) -> FloorState:
@@ -167,6 +172,7 @@ def _copy_state(state: GameState) -> GameState:
             _first_arrive_done=f._first_arrive_done,
             _no_pass_tiles=f._no_pass_tiles,
             _tile_to_trigger=f._tile_to_trigger,
+            _id_to_tile_full=f._id_to_tile_full,
         )
     return GameState(
         hero=new_hero,
@@ -178,6 +184,7 @@ def _copy_state(state: GameState) -> GameState:
         _floors_dir=state._floors_dir,
         _common_events=state._common_events,
         _merchants=state._merchants,
+        _enemy_overrides={k: dict(v) for k, v in state._enemy_overrides.items()},
     )
 
 
@@ -207,6 +214,23 @@ def load_floor(path: Path) -> FloorState:
             tile_to_trigger[int(k)] = v["trigger"]
 
     id_to_tile = {v: int(k) for k, v in tile_to_entity.items()}
+
+    # 全量 id→tile（覆盖所有分段：walls/terrains/animates/items/enemys/npcs）。
+    # 实体用 _monster/_item，其余用 id。首次出现优先（避免重复 id 覆盖）。供 setBlock 字符串/searchBlock。
+    id_to_tile_full: dict = {}
+    for entries in tiles_db.values():
+        if not isinstance(entries, dict):
+            continue
+        for k, v in entries.items():
+            if not isinstance(v, dict):
+                continue
+            try:
+                tid = int(k)
+            except (ValueError, TypeError):
+                continue
+            ident = v.get("id") or v.get("_monster") or v.get("_item")
+            if ident and ident not in id_to_tile_full:
+                id_to_tile_full[ident] = tid
 
     # 数据驱动收集不可通行地形 tile（tiles.json 任意段中 noPass:true 且非实体）。
     # 取代仅靠硬编码 WALL_TILES：祭坛半格(7/8)等塔特有装饰墙由数据声明。
@@ -258,6 +282,7 @@ def load_floor(path: Path) -> FloorState:
         after_get_item=data.get("afterGetItem", {}),
         _no_pass_tiles=no_pass_tiles,
         _tile_to_trigger=tile_to_trigger,
+        _id_to_tile_full=id_to_tile_full,
     )
 
 
@@ -550,44 +575,24 @@ def _handle_oldman(state: GameState, x: int, y: int) -> None:
 
 # ─── Combat ──────────────────────────────────────────────────────────────────
 
-def _fight_monster(state: GameState, mx: int, my: int) -> None:
-    hero = state.hero
-    floor = state.floor
-
-    tile = floor.entities[my][mx]
-    monster_id = floor._tile_to_enemy[tile]
-    m = floor._monsters_db[monster_id]
-
-    sp = m.get("special", [])
+def _build_monster(state: GameState, monster_id: str) -> Monster:
+    """从 monsters.json + setEnemy 覆盖(_enemy_overrides)构建战斗用怪。
+    普通战斗与剧情 boss 共用此逻辑，确保 setEnemy 改的 special(如先攻)对两者一致。见 mechanics §M.1/M.4。"""
+    m = state.floor._monsters_db[monster_id]
+    ov = state._enemy_overrides.get(monster_id, {})
+    sp = ov.get("special", m.get("special", []))
     if isinstance(sp, int):
         sp = [sp] if sp else []
-
-    monster = Monster(
+    return Monster(
         id=monster_id, name=m["name"],
-        hp=m["hp"], atk=m["atk"], def_=m["def"],
-        special=sp, n=m.get("n", 0), value=m.get("value", 0.0),
+        hp=ov.get("hp", m["hp"]), atk=ov.get("atk", m["atk"]), def_=ov.get("def", m["def"]),
+        special=list(sp), n=m.get("n", 0), value=m.get("value", 0.0),
         add=m.get("add", False), atkValue=m.get("atkValue", 0.1),
         defValue=m.get("defValue", 0.9), damage=m.get("damage", 0),
     )
-    hero_ps = PlayerState(hp=hero.hp, atk=hero.atk, def_=hero.def_, mdef=hero.mdef)
-    has_cross = hero.items.get("cross", 0) > 0
-    result = compute_combat(hero_ps, monster, has_cross=has_cross)
 
-    if result.damage is None:
-        return
 
-    # 引擎 canBattle 规则(core.enemys.canBattle: damage != null && damage < hp)：
-    # 须 damage < hp 才可战斗；damage >= hp(战后 HP≤0)会死 → events.battle 拦截，
-    # 不战斗、英雄原地不动(等同撞墙/noPass，这步无效，HP/坐标/钥匙/金币全不变)。
-    if result.damage >= hero.hp:
-        return
-
-    hero.hp -= result.damage
-    hero.gold += m.get("gold", 0)
-    hero.kill_count += 1
-    floor.entities[my][mx] = 0
-    hero.x, hero.y = mx, my
-
+def _apply_post_combat_effects(hero: HeroState, result) -> None:
     if result.effects.poison:
         hero.flags["poison"] = True
     if result.effects.weak:
@@ -598,12 +603,61 @@ def _fight_monster(state: GameState, mx: int, my: int) -> None:
     if result.effects.explode:
         hero.hp = 1
 
+
+def _fight_monster(state: GameState, mx: int, my: int) -> None:
+    hero = state.hero
+    floor = state.floor
+
+    tile = floor.entities[my][mx]
+    monster_id = floor._tile_to_enemy[tile]
+    monster = _build_monster(state, monster_id)
+    hero_ps = PlayerState(hp=hero.hp, atk=hero.atk, def_=hero.def_, mdef=hero.mdef)
+    has_cross = hero.items.get("cross", 0) > 0
+    result = compute_combat(hero_ps, monster, has_cross=has_cross)
+
+    if result.damage is None:
+        return
+
+    # 引擎 canBattle 规则(core.enemys.canBattle: damage != null && damage < hp)：
+    # 须 damage < hp 才可战斗；damage >= hp(战后 HP≤0)会死 → events.battle 拦截，
+    # 不战斗、英雄原地不动(等同撞墙/noPass，这步无效，HP/坐标/钥匙/金币全不变)。
+    # ⚠ 唯一例外：剧情 boss(MT32/MT40)用 battle 指令走 _forced_battle 强制路径，绕过本拦截。见 mechanics §M。
+    if result.damage >= hero.hp:
+        return
+
+    hero.hp -= result.damage
+    hero.gold += floor._monsters_db[monster_id].get("gold", 0)
+    hero.kill_count += 1
+    floor.entities[my][mx] = 0
+    hero.x, hero.y = mx, my
+
+    _apply_post_combat_effects(hero, result)
+
     loc_key = f"{mx},{my}"
     if loc_key in floor.after_battle and loc_key not in floor._done_after_battle:
         floor._done_after_battle.add(loc_key)
         _execute_event_list(state, floor.after_battle[loc_key], mx, my)
 
     _fire_events(state, mx, my)
+
+
+def _forced_battle(state: GameState, enemy_id: str) -> None:
+    """剧情 boss 强制战斗(battle 指令, force=true)：跳过 canBattle 拦截，无条件扣血(可致死)。
+    不操作网格——boss 的生成/移除由演出的 setBlock/hide 自理。见 mechanics §M.1/M.4。"""
+    floor = state.floor
+    hero = state.hero
+    if enemy_id not in floor._monsters_db:
+        return
+    monster = _build_monster(state, enemy_id)
+    hero_ps = PlayerState(hp=hero.hp, atk=hero.atk, def_=hero.def_, mdef=hero.mdef)
+    has_cross = hero.items.get("cross", 0) > 0
+    result = compute_combat(hero_ps, monster, has_cross=has_cross)
+    if result.damage is None:
+        return  # 打不动(hero_per==0)：route 不会到此
+    hero.hp -= result.damage          # force：不拦截，直接扣血（可致 hp<=0 = 死亡）
+    hero.gold += floor._monsters_db[enemy_id].get("gold", 0)
+    hero.kill_count += 1
+    _apply_post_combat_effects(hero, result)
 
 
 # ─── Item pickup ─────────────────────────────────────────────────────────────
@@ -817,8 +871,8 @@ def _execute_instruction(
         try:
             num = int(num_raw)
         except (ValueError, TypeError):
-            # String entity ID → look up tile integer
-            num = floor._id_to_tile.get(str(num_raw), 0)
+            # 字符串 tile id → 反查编号（全量映射，含门/墙/地形，如 specialDoor/yellowWall）。见 mechanics §M.5
+            num = floor._id_to_tile_full.get(str(num_raw), 0)
         for loc in instr.get("loc", []):
             lx, ly = loc[0], loc[1]
             if num == 0:
@@ -829,6 +883,30 @@ def _execute_instruction(
             else:
                 floor.terrain[ly][lx] = num
                 floor.entities[ly][lx] = 0
+        return
+
+    # ── setEnemy（临时改怪，如剧情 boss 赋予先攻）──────────────────────────────
+    if t == "setEnemy":
+        eid = instr.get("id")
+        name = instr.get("name", "")
+        value = instr.get("value")
+        if eid:
+            ov = state._enemy_overrides.setdefault(eid, {})
+            if name == "special":
+                iv = int(value) if value not in (None, "") else 0
+                ov["special"] = [iv] if iv else []   # value 0 → 清空特技（解除先攻）
+            else:
+                try:
+                    ov[name] = int(value)
+                except (ValueError, TypeError):
+                    ov[name] = value
+        return
+
+    # ── battle（剧情强制战斗，绕过 canBattle 拦截）─────────────────────────────
+    if t == "battle":
+        eid = instr.get("id")
+        if eid:
+            _forced_battle(state, eid)
         return
 
     # ── openDoor ──────────────────────────────────────────────────────────────
@@ -966,6 +1044,23 @@ def _execute_instruction(
 
 # ─── Condition evaluator ─────────────────────────────────────────────────────
 
+def _search_block_count(state: GameState, block_id: str, floor_id: str) -> int:
+    """core.searchBlock(id, floor).length：目标层上该 id 的方块数量（扫 terrain+entities）。
+    目标层未提取/找不到 id 则记 0。见 mechanics §M.6。"""
+    if not _load_floor_if_needed(state, floor_id):
+        return 0
+    tf = state.floors[floor_id]
+    tile = tf._id_to_tile_full.get(block_id)
+    if tile is None:
+        return 0
+    cnt = 0
+    for row in tf.terrain:
+        cnt += row.count(tile)
+    for row in tf.entities:
+        cnt += row.count(tile)
+    return cnt
+
+
 def _eval_condition(condition: str, state: GameState) -> bool:
     return all(_eval_single(p.strip(), state) for p in condition.split("&&"))
 
@@ -1014,6 +1109,26 @@ def _eval_single(part: str, state: GameState) -> bool:
         if op == "<":  return lhs < rhs_val
         if op == "==": return lhs == rhs_val
         if op == "!=": return lhs != rhs_val
+
+    # core.canBattle('id')：剧情 boss if 分支用 = 能击杀且不致死(damage != null && damage < hp)。见 mechanics §M.4
+    m = re.match(r"\(?core\.canBattle\('(\w+)'\)\)?", part)
+    if m:
+        eid = m.group(1)
+        if eid not in floor._monsters_db:
+            return False
+        monster = _build_monster(state, eid)
+        hero_ps = PlayerState(hp=hero.hp, atk=hero.atk, def_=hero.def_, mdef=hero.mdef)
+        has_cross = hero.items.get("cross", 0) > 0
+        result = compute_combat(hero_ps, monster, has_cross=has_cross)
+        return result.damage is not None and result.damage < hero.hp
+
+    # core.searchBlock('id','floor').length OP n：MT29 小偷暗道支线条件。见 mechanics §M.6
+    m = re.match(r"\(?core\.searchBlock\('(\w+)',\s*'(\w+)'\)\.length\s*(>=|<=|==|!=|>|<)\s*(\d+)\)?", part)
+    if m:
+        bid, fid, op, num = m.group(1), m.group(2), m.group(3), int(m.group(4))
+        cnt = _search_block_count(state, bid, fid)
+        return {">=": cnt >= num, "<=": cnt <= num, "==": cnt == num,
+                "!=": cnt != num, ">": cnt > num, "<": cnt < num}[op]
 
     return False
 

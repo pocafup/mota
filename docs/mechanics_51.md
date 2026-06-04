@@ -1230,6 +1230,62 @@ downFly 不检查 canFlyFrom。从 MT50 的某坐标 (x,y) 向下飞，目标为
 
 ---
 
+## M. 剧情 Boss 强制战斗（MT32 / MT40 骑士队长）—— canBattle 拦截的唯一例外
+
+> ⚠️ **全塔铁律例外，务必记清，禁止当作 bug "修掉"。**
+> 普通战斗遵守 canBattle 拦截：`damage >= hp` 时**不允许战斗、英雄原地不动**（见 `sim/combat` + `_fight_monster`，对应 `core.enemys.canBattle` = `damage != null && damage < hp`）。
+> **MT32 与 MT40 的骑士队长 boss 是全塔仅有的两处「强制战斗（force）」**：勇者走到触发格被剧情拉去打，**即使 `damage >= hp` 也必须打，打不过就当场死亡**——与普通拦截规则**相反**。
+
+### M.1 引擎依据（force 语义）
+
+`core.events.battle(id, x, y, force, ...)` 的拦截判断为 `if (n > 0 && !force ...)`（n = 预计损血）：
+- `force = false`（普通战斗）：`damage > 0 且 damage >= hp` → 拦截，不打。
+- `force = true`（剧情 boss）：跳过拦截，无条件开打，扣 `damage`（可致 `hp <= 0` = 死亡）。
+
+事件脚本里以 `{"type":"battle","id":"..."}` 触发的战斗即走 `force=true` 路径（剧情强制）。
+
+### M.2 MT32 骑士队长完整时序（来源：`MT32.json` events["6,10"]）
+
+prologue 演出 + 强制战斗，逐条：
+1. `setEnemy id=yellowKnight name=special value=1` —— **临时把骑士队长的 special 置为 `[1]`（先攻）**。
+2. `hide (6,2) (6,9) remove` —— 清掉两块 `whiteWall2(321)` 装饰。
+3. `setBlock number="yellowKnight" loc=[[10,1]]` —— 在 (10,1) **动态生成**骑士队长（字符串 id，tile 226）。
+4. `move/keep` 演出：把队长移到 (6,1) 一带，对话。
+5. `if core.canBattle('yellowKnight')`：
+   - **true → `battle yellowKnight`（强制战斗）**。本存档 route 走这支（勇者打赢、不死）。
+   - false → 退化分支（`!flag:addhp && flag:开启特性` 等），最终仍是 `battle`（强制）或直接 `hp=0`，即**打不过则死**。
+6. 战后对话「有本事到 40 楼再打一次」+ 移动演出。
+7. `setEnemy id=yellowKnight name=special value=0` —— **还原 special 为 `[]`**（解除先攻）。
+8. `hide remove` —— 清掉演出残留。
+> 另有 `afterBattle["1,10"]["3,10"]`（与 boss 无关）：杀 2 只 blueGuard 计数 `flag:32`，满则 `openDoor(2,9)`。
+
+### M.3 骑士队长的先攻来自哪里（源码坐实）
+
+- `monsters.json.yellowKnight`：hp=120 / atk=150 / def=50 / gold=100，**`special=[]`（基础无特技）**。
+- 先攻**不是怪物常驻**，而是上面第 1 步 `setEnemy special=1` **临时赋予**，第 7 步还原。
+- special 1 = 先攻，伤害公式已实现（§A.4 第 84 行 `if hasSpecial(1): init_damage += per_damage`，即英雄多挨一刀；§A.1「玩家先手，除非怪物有先攻」）。
+- ∴ boss 这一刀的多挨损血 = `per_damage`，必须在 setEnemy 生效后用同一套 getDamageInfo 算，**不得手写**。
+
+### M.4 模拟器实现要点（force 仅限这两场，普通战斗拦截不变）
+
+1. `setEnemy`：维护 `GameState._enemy_overrides = {id: {attr: val}}`；`special` 的 `value` 解析为 `[int]`（0 → `[]`）。建怪时用覆盖值（`_build_monster`），普通战斗与 boss 共用同一建怪逻辑。
+2. `battle` 指令 = **强制战斗**：用 `_build_monster` + `compute_combat` 算 `damage`，**跳过 `damage >= hp` 拦截**，直接 `hp -= damage`（可致死），给金币/升级/后置效果；**不操作网格**（生成/移除由 boss 演出的 setBlock/hide 自理）。
+3. `core.canBattle('id')` 条件：建怪→算损血→`damage is not None and damage < hp`。
+4. **隔离**：force 路径只存在于 `battle` 指令；`_process_move → _fight_monster` 的普通战斗保留 `damage >= hp → return` 拦截，零改动。
+
+### M.5 setBlock 接受字符串 tile id（扩展）
+
+`setBlock number` 可为字符串（如 `"yellowKnight"` / `"yellowWall"` / `"specialDoor"`），引擎按 id 反查 tile 编号。原实现只查实体表（怪/道具/NPC），**门/墙/地形 id 查不到会误置 0**。修正：建**全量 id→tile 映射**（覆盖 tiles.json 全部分段：walls/terrains/animates/items/enemys/npcs）供 setBlock 字符串与 searchBlock 反查。
+- `yellowKnight`→226（enemy）、`yellowWall`→1（墙）、`specialDoor`→85（机关门）、`whiteWall2`→321（地形）。
+
+### M.6 searchBlock 语义（MT29 小偷暗道，支线）
+
+- `core.searchBlock('whiteWall2', 'MT23').length` = MT23 上 `whiteWall2(321)` 的当前数量。
+- MT29 events["6,2"]（踩小偷格）：`if (searchBlock('whiteWall2','MT23').length > 0)` → 再判 `flag:额外功能开关`（**默认关**）→ 默认只出对话、**不开** (6,3) 暗道；MT23 的 whiteWall 全被「还原」后（length==0）才直接开暗道（move + 传送 MT2）。
+- **原版**：碰过 MT23 所有 whiteWall 才能走 MT29 暗道；**当前版本无需完成**，暗道是通往 MT2 的**支线捷径，主线不依赖**。模拟器实现 searchBlock 基本语义即可（默认 length>0 → 暗道不开 → 主线走正常楼梯）。
+
+---
+
 ## K. 冰魔法（snow）与岩浆通行机制
 
 ### K.1 道具定义（来源：`core.material.items['snow']`）
