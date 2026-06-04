@@ -5,7 +5,29 @@
 
 ---
 
+## 🟢 扩层 MT34–MT41 + token2965 转绿（2026-06-04，22/26 检查点 PASS，commit 533c2e2）
+
+- **进展**：**22/26 检查点 PASS**，**MT1–MT33 全程逐 token 对齐 + MT34–MT41 八层已提取**，**64/64 测试全绿**。本段三件事：扩层 MT34–MT41（含原始 raw capture 落盘）、实现 snow 冰魔法（§K）、补 MT40 骑士队长 boss 13 连战测试（§M）；核心是**修正 flower(168) 误标 noPass**。
+- **token2965 根因 = flower(168) 提取误标 noPass，非"踩格机关"**（玩家原假设两处踩格事件，依铁律核对源码后报告差异）：
+  - **机关二（踩(10,5)→关(10,4)/(10,8)机关门）源码里存在且 sim 早已正确实现**：`MT33.events["10,5"]`（setBlock specialDoor + flag:骑士剑机关 + getBlockCls 四角怪判断）配 `autoEvent["11,4"]` 开门半。
+  - **机关一（踩(9,10)→(8,10)变墙）源码里查无此事件**（clean JSON、live raw capture、firstArrive/parallelDo/afterBattle 全空）。真因：`extract/blocksInfo_full.json['168']={id:flower,cls:terrains}` **无 noPass 字段** → h5mota terrains 默认可通行；旧 tiles.json 误标 `noPass:true` 把 (8,10) 当墙。
+  - **玩家实测路线坐实**：tok2939–2942 自 (7,10) 连按 R 向右穿 (8,10)→(9,10)→(10,10) 取 sword3(+40 ATK)，sim 误判撞墙 → ATK 卡 114(真值 154，差正好 40)。
+  - **修正** `tiles.json` 168 `noPass:false`（来源订正 blocksInfo + 路线印证）→ token2965 精确命中 `MT33(8,3) HP=6 ATK=154`，级联 token3212 同时转绿。（玩家所述"变墙"那条回退路最优路线未走，sim 不杜撰源码无据机制。）
+- **当前 FAIL（4 个，级联自 3371）**：token **3371 / 3704 / 4012 / 4141**。
+  - **首个 FAIL = token3371 MT32(1,4)：仅 HP sim=1006 vs 真值=606（差 +400），ATK/DEF/坐标/黄钥匙全吻合**——即 sim 在 [3212→3371] 这 159 步**少挨 400 HP**（与原 ATK 缺口无关，是另一回事）。
+  - **首个 FAIL 窗口 token[3212→3371] 已逐笔摆账**（`checkpoint_ledger.txt`，跑分器自动生成）。HP 收支净 +100（906→1006），真值要 606。**三个待玩家裁定的可疑点**：
+    - **(a) tok3253 `CHOICE:0` @ MT2(11,5)**：sim 只判"金币+1000"。这是什么选项事件？是否还应扣 400 HP 或别的代价？（语义未确认）
+    - **(b) tok3301 蓝血瓶 @ MT35(5,5)**：sim 给 +800（base200×ratio4，数据模型自洽）。真实回血是 +800 还是 +400？
+    - **(c) 五场战斗**（tok3228/3230/3333/3365/3367，损血 −220/−220/−260/−140/−260）某场是否带未建模 special 而少算损血。
+  - **G7（MT41 跨层机关 `events[10,2]`）继续挂待确认**（详见 memory/mechanics_status.md），**token4141 依赖它**，按玩家指示先不动。
+- **下个会话**：玩家裁定上述 (a)(b)(c) 三个可疑点后，据此定位并修复 token3371（铁律：不自行猜根因/改真值/改断言凑绿），随后看 3704/4012 级联，4141 待 G7 裁定。
+
+---
+
 ## 🔵 扩层第三批 MT29–MT33（2026-06-04，20/21 检查点 PASS，唯 token2965 待查）
+
+> ⚠ **本段 token2965 已于上方 🟢 段解决（根因 flower(168) 误标 noPass，commit 533c2e2）。以下保留作历史。**
+
 
 - **进展**：**20/21 检查点 PASS，MT1–MT33 基本对齐**（差 token2965）。61/61 测试全绿，17 个 pytest 检查点 + token2400/2501/2804 端点全 PASS（commit 50af961）。
 - **本段修复**（commit 50af961）：
