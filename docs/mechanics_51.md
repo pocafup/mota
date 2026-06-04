@@ -552,6 +552,8 @@ MT10 的关键机关是位于 (6,3) 的一道 `specialDoor`（机关门，tile 8
 
 #### G.7.3 已验证时间线（route 事实 + 模拟器实测）
 
+> ⚠️ **已过时（2026-06-04），以 §M 和当前实现为准。** 本节下方表格（token[80-101] 「intercepting=True」、token[102] 「CHOICE:1 推进对话」）及结论 568 行 ② 描述的「同步 move/generateMove 后对话→需 CHOICE 拦截推进」时间线，**当年系据已删除的 `had_sync_anim` 推断规则写成，与现状不符**。源码坐实：纯文字对话 `\t[name]text` 在回放中一律**不拦截、不消费 token**（引擎 replayActions 无文字处理器，仅 choices 读取选择 token）；MT10 小偷事件自 f28ceab 起靠 move+hide 独立成立、不依赖此拦截。该死规则已于 commit 50af961 删除（全塔扫描仅误伤 MT32 boss 演出，见 `extract/scan_sync_dialog.py`）。下方原文仅作历史留存。
+
 | token（local/0-indexed）| global_idx | 事件 | entities[10][6] | entities[11][6] | _exited |
 |------------------------|-----------|------|----------------|----------------|---------|
 | [79] D 踩 (6,9) | 1248 | generateMove 同步执行，对话暂停 | 123（小偷） | 0 | False |
