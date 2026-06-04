@@ -5,6 +5,18 @@
 
 ---
 
+## 🟢 MT40 boss存活才打(§M.7) + 死亡硬终止(§M.8) + changeFloor stair 落点：token4141 转绿，26/26 全 PASS，MT1–MT41 全程对齐（2026-06-04，commit eb1470e）
+
+- **进展**：**26/26 检查点全 PASS**，**MT1–MT41 全程逐 token 对齐**，**68/68 测试全绿**（原 64 + 新增 4）。本段三件事，消掉最后一个 FAIL（4141）：
+  1. **MT40 boss「存活才打」(§M.7)**：核对 events["6,7"] 内原始 JS（`extract/mt40_raw_capture.json`）——`for i=0..12: if core.getBlockId(a[i])!==null { move+battle }`，红门以上 13 格只对**还活着**的怪逐个先攻强制战斗，**已清格 getBlockId===null 跳过、零伤**。修：`MT40.json` 13 场 battle 各带 `loc:[x,y]`（顺序即源码 a 数组）；`simulator` battle 分支带 loc 走存活判断（entities==0 跳过、非 0 取该格怪 force 战斗后清格），**无 loc 保持无条件（MT32 不受波及）**。本路线 centerFly 瞬移 (2,1) 后先清光 13 格 → 踩 (6,7) 一场不打、HP 恒 262（吻合真值）。**纠正上一段误判**：旧 MT40.json 把 13 场展开为无条件 battle、丢了 getBlockId 存活判断——这才是 4141 HP 崖真因（非上段所列 (a)(b)(c)）。
+  2. **死亡硬终止 (§M.8)**：`GameState.dead`，`step()` 入口 dead 则一切 token no-op（冻结死亡点）；任何 hp≤0 结算（强制战斗 / 事件扣血 setValue / step 末尾兜底）置 dead；强制战斗序列中途致死 → `_execute_event_list` 立即停剩余指令。重放路线不触发，**为 solver 探索"会死路线"准备**（普通战斗 damage≥hp 拦截不变、永不致死，能死的只有 force/事件/地形）。
+  3. **changeFloor 支持 stair 字段落点（G7 解决）**：事件驱动的 `changeFloor` 原只认 `loc`、缺省 (0,0)；补上**有 loc 用 loc、无 loc 有 stair 查目标层 down_floor/up_floor、都无则报错**，与 fly 魔杖 / `_apply_stair_change` 同一套解析。MT40 events["6,1"] 的 `changeFloor :next stair:downFloor` → 落 MT41.downFloor=[6,2] → **token4141 转绿**。
+- **新增 4 测试**（`test_force_battle_mt32.py`）：§M.7 全清零伤 / 部分清场只打存活；§M.8 死亡 token no-op 冻结 / 死亡中途停战。
+- **G7（MT41 跨层机关）已解决**（= changeFloor stair 解析），从待确认移除。
+- **下一步**：**MT42–MT50 待提取**（raw capture + 落盘 `data/`）；**营救公主终局待验证**（通关条件 + 终局事件）。MT1–MT41 已是逐 token 金标准基线。
+
+---
+
 ## 🟢 多格boss footprint + setBlock跨层 + getBlock条件 + centerFly：token3371/3704/4012 转绿（2026-06-04，25/26 检查点 PASS，commit c33934d）
 
 - **进展**：**25/26 检查点 PASS**，**MT1–MT40 基本逐 token 对齐**，**64/64 测试全绿**。本段实现四件事，一次性消掉级联 FAIL 中的三个（3371/3704/4012）：
