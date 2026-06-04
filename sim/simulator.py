@@ -92,11 +92,17 @@ class FloorState:
     _event_break: bool = False
     # 不可通行地形 tile 集合（数据驱动，来自 tiles.json noPass:true：墙/熔岩/祭坛半格等）
     _no_pass_tiles: set = field(default_factory=set)
+    # 大型怪 footprint（数据驱动，来自 monsters.json footprint 字段）：{怪 tile_int: [(dx,dy),...]}。
+    # 怪实体存活时，其相对偏移覆盖的格全部 noPass（bigImage 多格碰撞，如魔龙/章鱼九宫格）。
+    _monster_footprints: dict = field(default_factory=dict)
     # NPC tile → trigger 语义（数据驱动，来自 tiles.json npcs.trigger，如 122→"trader"）
     _tile_to_trigger: dict = field(default_factory=dict)
     # 全量 id→tile（覆盖 walls/terrains/animates/items/enemys/npcs）：
     # 供 setBlock 字符串 number（如 "specialDoor"/"yellowWall"）与 searchBlock 反查。见 mechanics §M.5/M.6
     _id_to_tile_full: dict = field(default_factory=dict)
+    # 全量 tile→id 字符串（getBlockId 语义，来自 tiles.json id 字段）：
+    # 供 centerFly 落点判定（认 'airwall' 等）。见 mechanics §I.6
+    _tile_to_id: dict = field(default_factory=dict)
 
     @property
     def map(self) -> list:
@@ -173,6 +179,8 @@ def _copy_state(state: GameState) -> GameState:
             _no_pass_tiles=f._no_pass_tiles,
             _tile_to_trigger=f._tile_to_trigger,
             _id_to_tile_full=f._id_to_tile_full,
+            _monster_footprints=f._monster_footprints,
+            _tile_to_id=f._tile_to_id,
         )
     return GameState(
         hero=new_hero,
@@ -218,6 +226,7 @@ def load_floor(path: Path) -> FloorState:
     # 全量 id→tile（覆盖所有分段：walls/terrains/animates/items/enemys/npcs）。
     # 实体用 _monster/_item，其余用 id。首次出现优先（避免重复 id 覆盖）。供 setBlock 字符串/searchBlock。
     id_to_tile_full: dict = {}
+    tile_to_id: dict = {}
     for entries in tiles_db.values():
         if not isinstance(entries, dict):
             continue
@@ -231,6 +240,8 @@ def load_floor(path: Path) -> FloorState:
             ident = v.get("id") or v.get("_monster") or v.get("_item")
             if ident and ident not in id_to_tile_full:
                 id_to_tile_full[ident] = tid
+            if v.get("id") and tid not in tile_to_id:
+                tile_to_id[tid] = v["id"]
 
     # 数据驱动收集不可通行地形 tile（tiles.json 任意段中 noPass:true 且非实体）。
     # 取代仅靠硬编码 WALL_TILES：祭坛半格(7/8)等塔特有装饰墙由数据声明。
@@ -243,6 +254,13 @@ def load_floor(path: Path) -> FloorState:
                 tid = int(k)
                 if tid not in tile_to_entity:
                     no_pass_tiles.add(tid)
+
+    # 大型怪 footprint（数据驱动）：怪 tile → 相对偏移列表。来自 monsters.json 的 footprint 字段。
+    monster_footprints: dict = {}
+    for tnum, mid in tile_to_enemy.items():
+        fp = monsters_db.get(mid, {}).get("footprint")
+        if fp:
+            monster_footprints[tnum] = [(int(o[0]), int(o[1])) for o in fp]
 
     raw_map = data["map"]
     H = len(raw_map)
@@ -283,6 +301,8 @@ def load_floor(path: Path) -> FloorState:
         _no_pass_tiles=no_pass_tiles,
         _tile_to_trigger=tile_to_trigger,
         _id_to_tile_full=id_to_tile_full,
+        _monster_footprints=monster_footprints,
+        _tile_to_id=tile_to_id,
     )
 
 
@@ -369,6 +389,40 @@ def _use_snow(state: GameState) -> None:
             floor.terrain[ny][nx] = 0
 
 
+def _center_fly_can_land(floor: "FloorState", x: int, y: int) -> bool:
+    """centerFly 落点判定（canUseItemEffect）：对称点 getBlockId ∈ {null,'none','airwall'}。
+    = 空地/已清除(entity=0 且 terrain=0→getBlockId=null)、airwall(getBlockId='airwall')。
+    本塔 tiles.json 未收录 id='none' 装饰地板，若后续落点命中再扩展。
+    墙/fakeWall/门/楼梯/普通地形/怪/道具均拦截。注意：这是与常规移动 noPass 独立的另一套
+    判定——airwall 移动不可通行，但 centerFly 可落。来源 §I.6。"""
+    if floor.entities[y][x] != 0:
+        return False
+    ter = floor.terrain[y][x]
+    if ter == 0:
+        return True
+    return floor._tile_to_id.get(ter) == "airwall"
+
+
+def _use_center_fly(state: GameState) -> None:
+    """centerFly（瞬移，cls=tools）：中心对称瞬移到 (W-1-x, H-1-y)，不切层。
+    canUseItemEffect 校验对称点可落，否则整体 no-op（不瞬移、不消耗）。
+    tools 类使用成功后消耗 1（_afterUseItem，见 §K.2）。来源 §I.6。"""
+    hero, floor = state.hero, state.floor
+    if hero.items.get("centerFly", 0) <= 0:
+        return
+    rows = len(floor.terrain)
+    cols = len(floor.terrain[0]) if rows else 0
+    tx, ty = cols - 1 - hero.x, rows - 1 - hero.y
+    if not (0 <= tx < cols and 0 <= ty < rows):
+        return
+    if not _center_fly_can_land(floor, tx, ty):
+        return
+    hero.x, hero.y = tx, ty
+    hero.items["centerFly"] -= 1
+    if hero.items["centerFly"] <= 0:
+        del hero.items["centerFly"]
+
+
 def step(state: GameState, action: str) -> GameState:
     """Pure function: apply one action token to state, return new state."""
     state = _copy_state(state)
@@ -396,6 +450,8 @@ def step(state: GameState, action: str) -> GameState:
         item_id = state.floor._tile_to_item.get(tile)
         if item_id == "snow":
             _use_snow(state)
+        elif item_id == "centerFly":
+            _use_center_fly(state)
         _check_auto_events(state)
         return state
 
@@ -452,6 +508,26 @@ def step(state: GameState, action: str) -> GameState:
 
 # ─── Movement ────────────────────────────────────────────────────────────────
 
+def _in_alive_monster_footprint(floor: FloorState, nx: int, ny: int) -> bool:
+    """大型怪（monsters.json 声明了 footprint）存活时，其相对偏移覆盖的格不可通过；
+    怪本体格（偏移落回自身）除外，留给战斗判定，使"站正下方朝怪移动"仍能触发战斗。
+    footprint 为相对怪实体的 (dx,dy) 偏移，引擎读数据，不硬编码具体怪。"""
+    fps = floor._monster_footprints
+    if not fps:
+        return False
+    ent = floor.entities
+    H = len(ent)
+    W = len(ent[0]) if H else 0
+    for tile_num, offsets in fps.items():
+        for dx, dy in offsets:
+            ax, ay = nx - dx, ny - dy
+            if (ax, ay) == (nx, ny):
+                continue  # 偏移(0,0) → 怪本体格，留给战斗
+            if 0 <= ay < H and 0 <= ax < W and ent[ay][ax] == tile_num:
+                return True
+    return False
+
+
 def _process_move(state: GameState, direction: str) -> None:
     hero = state.hero
     floor = state.floor
@@ -461,6 +537,10 @@ def _process_move(state: GameState, direction: str) -> None:
     rows = len(floor.terrain)
     cols = len(floor.terrain[0]) if rows else 0
     if not (0 <= ny < rows and 0 <= nx < cols):
+        return
+
+    # 大型怪 footprint：存活时其覆盖格不可通过（怪本体格除外，留给下方战斗判定）。
+    if _in_alive_monster_footprint(floor, nx, ny):
         return
 
     t_tile = floor.terrain[ny][nx]
@@ -845,6 +925,17 @@ def _execute_instruction(
 
     # ── show ──────────────────────────────────────────────────────────────────
     if t == "show":
+        target_fid = instr.get("floorId")
+        if target_fid and target_fid != state.current_floor:
+            # 跨层 show：在目标层把隐藏事件(enable:false)显形（如 MT29(6,2) 小偷跨层显形 MT2(10,11)）。
+            # 仿 hide 分支；用 _load_floor_if_needed 保证目标层已加载，显形才能持久。
+            if _load_floor_if_needed(state, target_fid):
+                tf = state.floors[target_fid]
+                for lx, ly in _norm_loc_pairs(instr.get("loc"), state):
+                    ev = tf.events.get(f"{lx},{ly}")
+                    if isinstance(ev, dict):
+                        ev["enable"] = True
+            return
         for loc in instr.get("loc", []):
             lx, ly = loc[0], loc[1]
             lk = f"{lx},{ly}"
@@ -863,6 +954,9 @@ def _execute_instruction(
                 for lx, ly in _norm_loc_pairs(instr.get("loc"), state):
                     if instr.get("remove"):
                         tf._suppressed_events.add(f"{lx},{ly}")
+                        # 占位格（tile17 等大型怪 footprint）在 terrain 层，remove 时一并清除
+                        if tf.entities[ly][lx] == 0:
+                            tf.terrain[ly][lx] = 0
                     tf.entities[ly][lx] = 0
             return
         loc_param = instr.get("loc")
@@ -870,6 +964,9 @@ def _execute_instruction(
             for lx, ly in _norm_loc_pairs(loc_param, state):
                 if instr.get("remove"):
                     floor._suppressed_events.add(f"{lx},{ly}")
+                    # 占位格（tile17 等大型怪 footprint）在 terrain 层，remove 时一并清除
+                    if floor.entities[ly][lx] == 0:
+                        floor.terrain[ly][lx] = 0
                 floor.entities[ly][lx] = 0   # 清除实体（NPC/怪/道具）
         else:
             if instr.get("remove"):
@@ -879,22 +976,31 @@ def _execute_instruction(
 
     # ── setBlock ──────────────────────────────────────────────────────────────
     if t == "setBlock":
+        # 跨层 setBlock：floorId 指他层时改目标层（仿 show，必要时加载）。
+        # 机制一：MT2(10,11) 小偷把 MT35(4,9) 由墙改为地面，开通左路暗道。见 mechanics §M.5
+        target_fid = instr.get("floorId")
+        if target_fid and target_fid != state.current_floor:
+            if not _load_floor_if_needed(state, target_fid):
+                return
+            tf = state.floors[target_fid]
+        else:
+            tf = floor
         num_raw = instr.get("number", 0)
         try:
             num = int(num_raw)
         except (ValueError, TypeError):
             # 字符串 tile id → 反查编号（全量映射，含门/墙/地形，如 specialDoor/yellowWall）。见 mechanics §M.5
-            num = floor._id_to_tile_full.get(str(num_raw), 0)
+            num = tf._id_to_tile_full.get(str(num_raw), 0)
         for loc in instr.get("loc", []):
             lx, ly = loc[0], loc[1]
             if num == 0:
-                floor.entities[ly][lx] = 0
-                floor.terrain[ly][lx] = 0
-            elif num in floor._tile_to_entity:
-                floor.entities[ly][lx] = num
+                tf.entities[ly][lx] = 0
+                tf.terrain[ly][lx] = 0
+            elif num in tf._tile_to_entity:
+                tf.entities[ly][lx] = num
             else:
-                floor.terrain[ly][lx] = num
-                floor.entities[ly][lx] = 0
+                tf.terrain[ly][lx] = num
+                tf.entities[ly][lx] = 0
         return
 
     # ── setEnemy（临时改怪，如剧情 boss 赋予先攻）──────────────────────────────
@@ -1110,6 +1216,16 @@ def _eval_single(part: str, state: GameState) -> bool:
     if m:
         bx, by = int(m.group(1)), int(m.group(2))
         return floor.entities[by][bx] not in floor._tile_to_entity
+
+    # core.getBlock(x,y) ===/!== null：该格是否有 block（裸 getBlock，区别于 getBlockId）。
+    # h5mota 口径（§I.6 调用链）：blockObjs 收录所有 tile≠0 的格（墙/门/楼梯/地形/装饰/
+    # 怪/道具），tile==0→null。双层模型映射为 entity≠0 或 terrain≠0 即非 null。
+    # 用于 MT39 autoEvent[8,4] 九宫格条件（开两门后 (4,4) 黄门变 centerFly）。
+    m = re.match(r"core\.getBlock\((\d+),\s*(\d+)\)\s*(===|!==)\s*null", part)
+    if m:
+        bx, by, op = int(m.group(1)), int(m.group(2)), m.group(3)
+        nonnull = floor.entities[by][bx] != 0 or floor.terrain[by][bx] != 0
+        return (not nonnull) if op == "===" else nonnull
 
     # core.getBlockCls(x,y) ===/!== 'enemys'：判该格当前 entity 是否敌人类。
     # 数据驱动——敌人 tile 集合 = tiles.json enemys 段（_tile_to_enemy 键），不硬编码楼层。

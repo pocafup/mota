@@ -21,7 +21,7 @@
     "7":   {"id":"blueShop-left","noPass":true,"_note":"祭坛左半格（碰撞，不可通行；玩家实测祭坛碰撞为3格7/131/8，仅中间131下方可加点）"},
     "8":   {"id":"blueShop-right","noPass":true,"_note":"祭坛右半格（碰撞，不可通行；同上）"},
     "321": {"id":"whiteWall2","noPass":false,"_note":"白色装饰地形，可通行"},
-    "17":  {"id":"_unknown_visual","noPass":false,"_note":"blocksInfo 无记录，引擎视为可通行地板；MT10 埋伏触发时 setBlock 0 清除"},
+    "17":  {"id":"airwall","noPass":true,"_note":"airwall 透明墙(h5mota 标准空气墙编号17)，不可通行；本塔用作大型怪 bigImage 占位(MT15章鱼/MT35魔龙九宫格边角、MT10埋伏)。怪击败后 afterBattle hide remove 清除(配套清 terrain 层)；MT10埋伏 setBlock 0 清除。centerFly 落点判定 getBlockId='airwall'→可落(与常规移动 noPass 是两套判定，见 mechanics §I.6)。与 monsters.json footprint 双保险。"},
     "168": {"id":"flower","noPass":false,"_note":"花，装饰地形，可通行。来源订正: extract/blocksInfo_full.json['168']={id:flower,cls:terrains} 无 noPass 字段→h5mota terrains 默认可通行；旧标 noPass:true 系提取误判。玩家实测路线 51_*.h5route tok2939-2942 自(7,10)向右穿 (8,10)→(9,10)→(10,10)取 sword3 印证。MT33(8,10) / MT38(2,5)"}
   },
 

@@ -220,12 +220,16 @@
   "magicDragon": {
     "id": "magicDragon", "name": "魔龙",
     "hp": 1500, "atk": 600, "def": 250, "gold": 800,
-    "special": [], "notBomb": false
+    "special": [], "notBomb": false,
+    "footprint": [[-1,-2],[0,-2],[1,-2],[-1,-1],[0,-1],[1,-1],[-1,0],[0,0],[1,0]],
+    "_footprint_note": "bigImage 大型怪 3×3 占位碰撞体，锚点=怪实体格(底部中心)向上展开两行。活着时九格全 noPass，只能站锚点正下方(0,+1)朝上触发战斗。来源：引擎 bigImage 渲染机制。"
   },
   "octopus": {
     "id": "octopus", "name": "大乌贼",
     "hp": 1200, "atk": 180, "def": 20, "gold": 100,
-    "special": [], "notBomb": false
+    "special": [], "notBomb": false,
+    "footprint": [[-1,-2],[0,-2],[1,-2],[-1,-1],[0,-1],[1,-1],[-1,0],[0,0],[1,0]],
+    "_footprint_note": "bigImage 大型怪 3×3 占位碰撞体，锚点=怪实体格(底部中心)向上展开两行。活着时九格全 noPass，只能站锚点正下方(0,+1)朝上触发战斗。来源：引擎 bigImage 渲染机制。"
   },
   "evilBat": {
     "id": "evilBat", "name": "邪恶蝙蝠",
