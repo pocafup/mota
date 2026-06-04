@@ -352,6 +352,23 @@ def _apply_stair_change(state: GameState) -> bool:
 
 # ─── Public entry point ──────────────────────────────────────────────────────
 
+def _use_snow(state: GameState) -> None:
+    """冰魔法 snow（cls=constants，永久持有不消耗）：移除英雄四方向相邻 lava，
+    该格 tile→0 永久变空地。lava 的 tile 号经 _id_to_tile_full['lava'] 数据驱动解析，
+    不硬编码。来源 §K.4（snowFourDirections=true）。"""
+    floor = state.floor
+    lava = floor._id_to_tile_full.get("lava")
+    if lava is None:
+        return
+    hx, hy = state.hero.x, state.hero.y
+    rows = len(floor.terrain)
+    cols = len(floor.terrain[0]) if rows else 0
+    for dx, dy in ((0, -1), (0, 1), (-1, 0), (1, 0)):
+        nx, ny = hx + dx, hy + dy
+        if 0 <= ny < rows and 0 <= nx < cols and floor.terrain[ny][nx] == lava:
+            floor.terrain[ny][nx] = 0
+
+
 def step(state: GameState, action: str) -> GameState:
     """Pure function: apply one action token to state, return new state."""
     state = _copy_state(state)
@@ -373,8 +390,12 @@ def step(state: GameState, action: str) -> GameState:
         state.hero.y = ny
         return state
 
-    # 道具使用（ITEM:n）— upFly/downFly 等（MT1-MT11 段无此 token，暂为 no-op）
+    # 道具使用（ITEM:n，n=道具 tile）。按道具 id 派发；未建模道具暂为 no-op。
     if action.startswith("ITEM:"):
+        tile = int(action.split(":", 1)[1])
+        item_id = state.floor._tile_to_item.get(tile)
+        if item_id == "snow":
+            _use_snow(state)
         _check_auto_events(state)
         return state
 

@@ -1,0 +1,184 @@
+{
+  "_comment": "来源: core.floors['MT35'] (live engine, Playwright 提取)。events 存原始 h5mota 脚本。",
+  "floorId": "MT35",
+  "title": "魔塔 第35层",
+  "width": 13,
+  "height": 13,
+  "ratio": 4,
+  "bgm": "section4.mp3",
+  "downFloor": [6, 10],
+  "upFloor": [10, 1],
+  "_map_note": "map[y][x]，0=地板，1=墙。tile ID 含义见 tiles.json。",
+  "map": [
+    [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+    [1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 87, 1],
+    [1, 2, 2, 2, 2, 0, 0, 0, 1, 1, 1, 1, 1],
+    [1, 2, 1, 1, 1, 1, 85, 1, 1, 1, 1, 1, 1],
+    [1, 2, 1, 2, 1, 0, 0, 0, 1, 1, 1, 1, 1],
+    [1, 2, 1, 2, 1, 32, 32, 32, 1, 1, 1, 1, 1],
+    [1, 2, 1, 2, 1, 0, 54, 0, 1, 1, 1, 1, 1],
+    [1, 2, 1, 2, 1, 17, 257, 17, 1, 1, 1, 1, 1],
+    [1, 2, 1, 2, 1, 0, 0, 0, 1, 1, 1, 1, 1],
+    [1, 2, 1, 2, 1, 0, 0, 0, 1, 1, 1, 1, 1],
+    [1, 2, 1, 2, 1, 123, 0, 0, 1, 1, 1, 1, 1],
+    [1, 2, 2, 2, 1, 0, 88, 0, 1, 1, 1, 1, 1],
+    [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+  ],
+  "_map_entities": {
+    "_comment": "从 map 推导的实体位置，模拟器从 map+tiles.json 动态解析。",
+    "monsters": {
+      "magicDragon(257)": [
+        "(6,7)"
+      ]
+    },
+    "items": {
+      "bluePotion(32)": [
+        "(5,5)",
+        "(6,5)",
+        "(7,5)"
+      ],
+      "snow(54)": [
+        "(6,6)"
+      ]
+    },
+    "doors": {
+      "specialDoor(85)": [
+        "(6,3)"
+      ]
+    },
+    "fakes": {
+      "fakeWall(2)": [
+        "(1,2)",
+        "(2,2)",
+        "(3,2)",
+        "(4,2)",
+        "(1,3)",
+        "(1,4)",
+        "(3,4)",
+        "(1,5)",
+        "(3,5)",
+        "(1,6)",
+        "(3,6)",
+        "(1,7)",
+        "(3,7)",
+        "(1,8)",
+        "(3,8)",
+        "(1,9)",
+        "(3,9)",
+        "(1,10)",
+        "(3,10)",
+        "(1,11)",
+        "(2,11)",
+        "(3,11)"
+      ]
+    },
+    "npcs_terrain": {
+      "_unknown_visual(17)": [
+        "(5,7)",
+        "(7,7)"
+      ],
+      "thief(123)": [
+        "(5,10)"
+      ]
+    },
+    "stairs_terrain": {
+      "upFloor(87)": [
+        "(11,1)"
+      ],
+      "downFloor(88)": [
+        "(6,11)"
+      ]
+    }
+  },
+  "changeFloor": {
+    "11,1": {
+      "floorId": ":next",
+      "stair": "downFloor",
+      "time": 0
+    },
+    "6,11": {
+      "floorId": ":before",
+      "stair": "upFloor",
+      "time": 0
+    }
+  },
+  "events": {
+    "5,10": {
+      "trigger": null,
+      "enable": false,
+      "noPass": null,
+      "displayDamage": true,
+      "opacity": 1,
+      "filter": {
+        "blur": 0,
+        "hue": 0,
+        "grayscale": 0,
+        "invert": false,
+        "shadow": 0
+      },
+      "data": [
+        "\t[小偷,thief]你好，暗道已挖好，你可用它绕过魔龙。",
+        "\t[小偷,thief]我听说骑士队长（本区的头目）实力差又爱吹牛，所以被魔法警卫们讨厌。",
+        "\t[小偷,thief]这魔塔太危险了，我可不想再次被抓，我要离塔回去了，再见。",
+        {
+          "type": "move",
+          "time": 300,
+          "steps": [
+            "down:1",
+            "right:1"
+          ]
+        },
+        {
+          "type": "hide",
+          "remove": true,
+          "time": 500
+        }
+      ]
+    }
+  },
+  "firstArrive": [],
+  "eachArrive": [],
+  "afterGetItem": {},
+  "afterBattle": {
+    "6,7": [
+      {
+        "type": "openDoor",
+        "loc": [6, 3]
+      },
+      {
+        "type": "hide",
+        "loc": [
+          [5, 7],
+          [7, 7]
+        ],
+        "remove": true
+      },
+      {
+        "type": "if",
+        "condition": "flag:开启特性",
+        "true": [],
+        "false": [
+          {
+            "type": "setBlock",
+            "number": "bluePotion",
+            "loc": [
+              [5, 5],
+              [6, 5],
+              [7, 5]
+            ]
+          },
+          {
+            "type": "setBlock",
+            "number": "snow",
+            "loc": [
+              [6, 6]
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "autoEvent": {},
+  "afterOpenDoor": {},
+  "cannotMove": {}
+}

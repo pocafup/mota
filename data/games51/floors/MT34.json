@@ -1,0 +1,181 @@
+{
+  "_comment": "来源: core.floors['MT34'] (live engine, Playwright 提取)。events 存原始 h5mota 脚本。",
+  "floorId": "MT34",
+  "title": "魔塔 第34层",
+  "width": 13,
+  "height": 13,
+  "ratio": 4,
+  "bgm": "section4.mp3",
+  "downFloor": [2, 1],
+  "upFloor": [6, 10],
+  "_map_note": "map[y][x]，0=地板，1=墙。tile ID 含义见 tiles.json。",
+  "map": [
+    [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+    [1, 88, 0, 31, 1, 0, 21, 0, 1, 21, 21, 28, 1],
+    [1, 0, 0, 0, 81, 216, 0, 227, 81, 0, 21, 31, 1],
+    [1, 0, 216, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+    [1, 1, 81, 1, 1, 201, 1, 224, 1, 203, 1, 225, 1],
+    [1, 0, 0, 0, 1, 81, 1, 81, 1, 81, 1, 81, 1],
+    [1, 0, 330, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+    [1, 0, 0, 0, 1, 81, 1, 81, 1, 81, 1, 81, 1],
+    [1, 1, 81, 1, 1, 212, 1, 202, 1, 227, 1, 205, 1],
+    [1, 0, 0, 212, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+    [1, 224, 1, 0, 81, 0, 0, 0, 81, 225, 0, 31, 1],
+    [1, 32, 225, 0, 1, 0, 87, 0, 1, 0, 21, 27, 1],
+    [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+  ],
+  "_map_entities": {
+    "_comment": "从 map 推导的实体位置，模拟器从 map+tiles.json 动态解析。",
+    "monsters": {
+      "slimeMan(216)": [
+        "(5,2)",
+        "(2,3)"
+      ],
+      "redKnight(227)": [
+        "(7,2)",
+        "(9,8)"
+      ],
+      "greenSlime(201)": [
+        "(5,4)"
+      ],
+      "swordsman(224)": [
+        "(7,4)",
+        "(1,10)"
+      ],
+      "blackSlime(203)": [
+        "(9,4)"
+      ],
+      "soldier(225)": [
+        "(11,4)",
+        "(9,10)",
+        "(2,11)"
+      ],
+      "ghostSkeleton(212)": [
+        "(5,8)",
+        "(3,9)"
+      ],
+      "redSlime(202)": [
+        "(7,8)"
+      ],
+      "bat(205)": [
+        "(11,8)"
+      ]
+    },
+    "items": {
+      "redPotion(31)": [
+        "(3,1)",
+        "(11,2)",
+        "(11,10)"
+      ],
+      "yellowKey(21)": [
+        "(6,1)",
+        "(9,1)",
+        "(10,1)",
+        "(10,2)",
+        "(10,11)"
+      ],
+      "blueGem(28)": [
+        "(11,1)"
+      ],
+      "bluePotion(32)": [
+        "(1,11)"
+      ],
+      "redGem(27)": [
+        "(11,11)"
+      ]
+    },
+    "doors": {
+      "yellowDoor(81)": [
+        "(4,2)",
+        "(8,2)",
+        "(2,4)",
+        "(5,5)",
+        "(7,5)",
+        "(9,5)",
+        "(11,5)",
+        "(5,7)",
+        "(7,7)",
+        "(9,7)",
+        "(11,7)",
+        "(2,8)",
+        "(4,10)",
+        "(8,10)"
+      ]
+    },
+    "fakes": {
+      "unbreakableWall(330)": [
+        "(2,6)"
+      ]
+    },
+    "stairs_terrain": {
+      "downFloor(88)": [
+        "(1,1)"
+      ],
+      "upFloor(87)": [
+        "(6,11)"
+      ]
+    }
+  },
+  "changeFloor": {
+    "6,11": {
+      "floorId": ":next",
+      "stair": "downFloor",
+      "time": 0
+    },
+    "1,1": {
+      "floorId": ":before",
+      "stair": "upFloor",
+      "time": 0
+    }
+  },
+  "events": {},
+  "firstArrive": [],
+  "eachArrive": [],
+  "afterGetItem": {},
+  "afterBattle": {},
+  "autoEvent": {
+    "2,6": {
+      "0": {
+        "condition": "core.getBlockCls(5,4) !== 'enemys' && core.getBlockCls(7,4) !== 'enemys' && core.getBlockCls(9,4) !== 'enemys' && core.getBlockCls(11,4) !== 'enemys' && core.getBlockCls(5,8) !== 'enemys' && core.getBlockCls(7,8) !== 'enemys' && core.getBlockCls(9,8) !== 'enemys' && core.getBlockCls(11,8) !== 'enemys' ",
+        "currentFloor": true,
+        "priority": 0,
+        "delayExecute": false,
+        "multiExecute": false,
+        "data": [
+          {
+            "type": "hide",
+            "loc": [
+              [2, 6]
+            ],
+            "remove": true
+          },
+          {
+            "type": "setBlock",
+            "number": "yellowKey",
+            "loc": [
+              [1, 5],
+              [3, 5],
+              [1, 7],
+              [3, 7]
+            ],
+            "async": true
+          },
+          {
+            "type": "setBlock",
+            "number": "redKey",
+            "loc": [
+              [2, 6]
+            ],
+            "async": true
+          },
+          {
+            "type": "waitAsync"
+          }
+        ]
+      },
+      "1": null
+    }
+  },
+  "afterOpenDoor": {},
+  "cannotMove": {}
+}

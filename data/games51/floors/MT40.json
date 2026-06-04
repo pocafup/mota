@@ -1,0 +1,364 @@
+{
+  "_comment": "来源: core.floors['MT40'] (live engine, Playwright 提取)。events 存原始 h5mota 脚本。",
+  "floorId": "MT40",
+  "title": "魔塔 第40层",
+  "width": 13,
+  "height": 13,
+  "ratio": 4,
+  "bgm": "section4.mp3",
+  "downFloor": [10, 11],
+  "upFloor": [6, 2],
+  "_map_note": "map[y][x]，0=地板，1=墙。tile ID 含义见 tiles.json。",
+  "map": [
+    [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+    [1, 0, 0, 0, 0, 0, 226, 0, 0, 0, 0, 0, 1],
+    [1, 0, 224, 224, 224, 0, 0, 0, 227, 227, 227, 0, 1],
+    [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+    [1, 0, 0, 212, 212, 212, 0, 225, 225, 225, 0, 0, 1],
+    [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+    [1, 1, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1, 1],
+    [1, 1, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1, 1],
+    [1, 1, 1, 1, 1, 1, 83, 1, 1, 1, 1, 1, 1],
+    [1, 28, 21, 0, 1, 216, 0, 216, 1, 31, 224, 0, 1],
+    [1, 32, 0, 0, 1, 0, 0, 0, 1, 225, 0, 0, 1],
+    [1, 27, 0, 227, 82, 0, 0, 0, 81, 0, 0, 88, 1],
+    [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+  ],
+  "_map_entities": {
+    "_comment": "从 map 推导的实体位置，模拟器从 map+tiles.json 动态解析。",
+    "monsters": {
+      "yellowKnight(226)": [
+        "(6,1)"
+      ],
+      "swordsman(224)": [
+        "(2,2)",
+        "(3,2)",
+        "(4,2)",
+        "(10,9)"
+      ],
+      "redKnight(227)": [
+        "(8,2)",
+        "(9,2)",
+        "(10,2)",
+        "(3,11)"
+      ],
+      "ghostSkeleton(212)": [
+        "(3,4)",
+        "(4,4)",
+        "(5,4)"
+      ],
+      "soldier(225)": [
+        "(7,4)",
+        "(8,4)",
+        "(9,4)",
+        "(9,10)"
+      ],
+      "slimeMan(216)": [
+        "(5,9)",
+        "(7,9)"
+      ]
+    },
+    "items": {
+      "blueGem(28)": [
+        "(1,9)"
+      ],
+      "yellowKey(21)": [
+        "(2,9)"
+      ],
+      "redPotion(31)": [
+        "(9,9)"
+      ],
+      "bluePotion(32)": [
+        "(1,10)"
+      ],
+      "redGem(27)": [
+        "(1,11)"
+      ]
+    },
+    "doors": {
+      "redDoor(83)": [
+        "(6,8)"
+      ],
+      "blueDoor(82)": [
+        "(4,11)"
+      ],
+      "yellowDoor(81)": [
+        "(8,11)"
+      ]
+    },
+    "stairs_terrain": {
+      "downFloor(88)": [
+        "(11,11)"
+      ]
+    }
+  },
+  "changeFloor": {
+    "11,11": {
+      "floorId": ":before",
+      "stair": "upFloor",
+      "time": 0
+    }
+  },
+  "events": {
+    "6,1": [
+      {
+        "type": "if",
+        "condition": "flag:402",
+        "true": [
+          {
+            "type": "changeFloor",
+            "floorId": ":next",
+            "stair": "downFloor",
+            "time": 0
+          }
+        ],
+        "false": []
+      }
+    ],
+    "6,7": [
+      {
+        "type": "playBgm",
+        "name": "Knight.mp3"
+      },
+      {
+        "type": "setEnemy",
+        "id": "ghostSkeleton",
+        "name": "special",
+        "value": "1"
+      },
+      {
+        "type": "setEnemy",
+        "id": "soldier",
+        "name": "special",
+        "value": "1"
+      },
+      {
+        "type": "setEnemy",
+        "id": "swordsman",
+        "name": "special",
+        "value": "1"
+      },
+      {
+        "type": "setEnemy",
+        "id": "redKnight",
+        "name": "special",
+        "value": "1"
+      },
+      {
+        "type": "setEnemy",
+        "id": "yellowKnight",
+        "name": "special",
+        "value": "1"
+      },
+      "\t[骑士队长,yellowKnight]我还在担心你不能来了。我确信这次我一定能杀了你。鬼战士给我上！",
+      {
+        "_comment": "MT40 boss：原 events[6, 7] 内 JS function(core.insertAction(todo)) 的忠实展开。a[0..11]=12小怪依次被移到(6,7)强制 battle 击杀：ghostSkeleton×3(原[5, 4][4, 4][3, 4])、soldier×3([7, 4][8, 4][9, 4])、swordsman×3([4, 2][3, 2][2, 2])、redKnight×3([8, 2][9, 2][10, 2])；a[12]=[6, 1] yellowKnight getBlockId!==null→第13场 battle(队长本人)。全部 force=true(§M.1)，全程 special=1先攻(见前后 setEnemy)。怪移除+掉落由后文 setBlock(21/27/32/28 覆盖原12格)与 setBlock 87[6, 1] 自理，故此处仅留影响 hero 的 battle；i=12 的 setBlock upFloor[6, 1] 与后文重复、setBlock yellowKnight[6, 7]+move(keep=false) 为纯逃跑演出，均不影响 hero，略。屠龙刀/十字架对这些怪无翻倍(§A.4)。"
+      },
+      {
+        "type": "battle",
+        "id": "ghostSkeleton"
+      },
+      {
+        "type": "battle",
+        "id": "ghostSkeleton"
+      },
+      {
+        "type": "battle",
+        "id": "ghostSkeleton"
+      },
+      "\t[yellowKnight]哼，没关系，士兵们给我上！",
+      {
+        "type": "battle",
+        "id": "soldier"
+      },
+      {
+        "type": "battle",
+        "id": "soldier"
+      },
+      {
+        "type": "battle",
+        "id": "soldier"
+      },
+      "\t[yellowKnight]真正的战斗才刚开始，让我们继续，双手剑士给我上！",
+      {
+        "type": "battle",
+        "id": "swordsman"
+      },
+      {
+        "type": "battle",
+        "id": "swordsman"
+      },
+      {
+        "type": "battle",
+        "id": "swordsman"
+      },
+      "\t[yellowKnight]哼，你们这战怎么打得？骑士们给我冲！",
+      {
+        "type": "battle",
+        "id": "redKnight"
+      },
+      {
+        "type": "battle",
+        "id": "redKnight"
+      },
+      {
+        "type": "battle",
+        "id": "redKnight"
+      },
+      "\t[yellowKnight]你怎会击败我所有的手下？我和你誓不两立我决不认输。（骑士队长失去了理智）",
+      {
+        "type": "battle",
+        "id": "yellowKnight"
+      },
+      "\t[yellowKnight]这次先饶了你，下次碰到我会和你正式的决斗，你最好投降。（骑士队长逃走了）",
+      {
+        "type": "setEnemy",
+        "id": "ghostSkeleton",
+        "name": "special",
+        "value": "0"
+      },
+      {
+        "type": "setEnemy",
+        "id": "soldier",
+        "name": "special",
+        "value": "0"
+      },
+      {
+        "type": "setEnemy",
+        "id": "swordsman",
+        "name": "special",
+        "value": "0"
+      },
+      {
+        "type": "setEnemy",
+        "id": "redKnight",
+        "name": "special",
+        "value": "0"
+      },
+      {
+        "type": "setEnemy",
+        "id": "yellowKnight",
+        "name": "special",
+        "value": "0"
+      },
+      {
+        "type": "setBlock",
+        "number": "21",
+        "loc": [
+          [2, 2]
+        ]
+      },
+      {
+        "type": "setBlock",
+        "number": "21",
+        "loc": [
+          [3, 2]
+        ]
+      },
+      {
+        "type": "setBlock",
+        "number": "21",
+        "loc": [
+          [4, 2]
+        ]
+      },
+      {
+        "type": "setBlock",
+        "number": "27",
+        "loc": [
+          [8, 2]
+        ]
+      },
+      {
+        "type": "setBlock",
+        "number": "27",
+        "loc": [
+          [9, 2]
+        ]
+      },
+      {
+        "type": "setBlock",
+        "number": "27",
+        "loc": [
+          [10, 2]
+        ]
+      },
+      {
+        "type": "setBlock",
+        "number": "32",
+        "loc": [
+          [3, 4]
+        ]
+      },
+      {
+        "type": "setBlock",
+        "number": "32",
+        "loc": [
+          [4, 4]
+        ]
+      },
+      {
+        "type": "setBlock",
+        "number": "32",
+        "loc": [
+          [5, 4]
+        ]
+      },
+      {
+        "type": "setBlock",
+        "number": "28",
+        "loc": [
+          [7, 4]
+        ]
+      },
+      {
+        "type": "setBlock",
+        "number": "28",
+        "loc": [
+          [8, 4]
+        ]
+      },
+      {
+        "type": "setBlock",
+        "number": "28",
+        "loc": [
+          [9, 4]
+        ]
+      },
+      {
+        "type": "setBlock",
+        "number": "87",
+        "loc": [
+          [6, 1]
+        ]
+      },
+      {
+        "type": "setValue",
+        "name": "flag:402",
+        "value": "true"
+      },
+      {
+        "type": "show",
+        "loc": [
+          [6, 1]
+        ],
+        "time": 0
+      },
+      {
+        "type": "hide",
+        "loc": [
+          [6, 7]
+        ],
+        "remove": true,
+        "time": 0
+      }
+    ]
+  },
+  "firstArrive": [],
+  "eachArrive": [],
+  "afterGetItem": {},
+  "afterBattle": {},
+  "autoEvent": {},
+  "afterOpenDoor": {},
+  "cannotMove": {}
+}

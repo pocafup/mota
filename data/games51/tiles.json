@@ -22,7 +22,7 @@
     "8":   {"id":"blueShop-right","noPass":true,"_note":"祭坛右半格（碰撞，不可通行；同上）"},
     "321": {"id":"whiteWall2","noPass":false,"_note":"白色装饰地形，可通行"},
     "17":  {"id":"_unknown_visual","noPass":false,"_note":"blocksInfo 无记录，引擎视为可通行地板；MT10 埋伏触发时 setBlock 0 清除"},
-    "168": {"id":"flower","noPass":true,"_note":"花，装饰地形，不可通行（live engine blocksInfo cls=terrains noPass=true）；MT33(8,10)"}
+    "168": {"id":"flower","noPass":false,"_note":"花，装饰地形，可通行。来源订正: extract/blocksInfo_full.json['168']={id:flower,cls:terrains} 无 noPass 字段→h5mota terrains 默认可通行；旧标 noPass:true 系提取误判。玩家实测路线 51_*.h5route tok2939-2942 自(7,10)向右穿 (8,10)→(9,10)→(10,10)取 sword3 印证。MT33(8,10) / MT38(2,5)"}
   },
 
   "animates": {
@@ -141,6 +141,7 @@
     "249": {"id":"swordEmperor","_monster":"swordEmperor"},
     "250": {"id":"whiteHornSlime","_monster":"whiteHornSlime"},
     "251": {"id":"badPrincess","_monster":"badPrincess"},
+    "257": {"id":"magicDragon","_monster":"magicDragon","_note":"魔龙（MT35(6,7)，cls=enemys/trigger=battle/noPass=true，hp1500/atk600/def250/money800/special=[]，live engine getBlockByNumber(257) 坐实；击败后 afterBattle[6,7] 放 snow 道具，§K.3；§A.4 knife 对其攻击×2）"},
     "258": {"id":"octopus","_monster":"octopus","_note":"大章鱼（MT15(6,6)，hp1200/atk180/def20；历史数据曾误标 steelRock，引擎权威=octopus，玩家已确认）"}
   },
 
