@@ -125,6 +125,7 @@ class GameState:
     visited_floors: set
     pending_floor_change: dict | None  # {"floor_id", "x", "y"} set by changeFloor event
     _floors_dir: Path      # base directory for lazy floor loading
+    dead: bool = False     # 勇者死亡(HP≤0)硬终止：置位后 step() 对一切 token no-op。见 mechanics §M.8
     _common_events: dict = field(default_factory=dict)
     _merchants: dict = field(default_factory=dict)  # 商人目录缓存 {floorId@x@y: {price, give}}
     # setEnemy 临时改怪：{monster_id: {attr: value}}。special 存为 list（见 mechanics §M.1/M.4）
@@ -193,6 +194,7 @@ def _copy_state(state: GameState) -> GameState:
         _common_events=state._common_events,
         _merchants=state._merchants,
         _enemy_overrides={k: dict(v) for k, v in state._enemy_overrides.items()},
+        dead=state.dead,
     )
 
 
@@ -424,7 +426,21 @@ def _use_center_fly(state: GameState) -> None:
 
 
 def step(state: GameState, action: str) -> GameState:
-    """Pure function: apply one action token to state, return new state."""
+    """Pure function: apply one action token to state, return new state.
+
+    死亡硬终止（引擎机制，见 mechanics §M.8）：勇者 HP≤0 即 game over，
+    之后一切 token 全部 no-op（不战斗/拾取/切层/触发事件），状态冻结在死亡点。
+    任何绕过 canBattle 拦截的死亡来源（强制战斗 §M、地形伤、poison、事件扣血）
+    都在此统一兜底——本 step 结束后若 HP≤0 即置 dead。"""
+    if state.dead:
+        return state  # 已死：冻结，原样返回（无副作用，等效 no-op）
+    new_state = _step_impl(state, action)
+    if new_state.hero.hp <= 0:
+        new_state.dead = True
+    return new_state
+
+
+def _step_impl(state: GameState, action: str) -> GameState:
     state = _copy_state(state)
 
     # fly魔杖切层（FLOOR:MTn token）
@@ -759,6 +775,8 @@ def _forced_battle(state: GameState, enemy_id: str) -> None:
     hero.gold += floor._monsters_db[enemy_id].get("gold", 0)
     hero.kill_count += 1
     _apply_post_combat_effects(hero, result)
+    if hero.hp <= 0:
+        state.dead = True             # 死在这一场 → 冻结于此，事件列剩余指令不再执行（§M.8）
 
 
 # ─── Item pickup ─────────────────────────────────────────────────────────────
@@ -800,6 +818,13 @@ def _apply_item_effect(hero: HeroState, effect: dict, ratio: int) -> None:
         for op in effect["ops"]:
             attr = "def_" if op["stat"] == "def" else op["stat"]
             setattr(hero, attr, getattr(hero, attr) + op["delta"])
+    elif t == "add_item":
+        # 拾取即向背包添加另一道具（引擎 core.addItem）。例：centerFly3 → +3 centerFly。
+        item, count = effect["item"], effect.get("count", 1)
+        if item in _KEY_ITEMS:
+            hero.keys[item] = hero.keys.get(item, 0) + count
+        else:
+            hero.items[item] = hero.items.get(item, 0) + count
 
 
 # ─── Event firing ────────────────────────────────────────────────────────────
@@ -851,6 +876,10 @@ def _execute_event_list(
                 return
 
             _execute_instruction(state, instr, event_x, event_y, ctx)
+
+            # 死亡硬终止：本指令致 hp<=0（强制战斗/事件扣血）→ 冻结于死亡点，剩余指令不执行（§M.8）
+            if state.dead:
+                return
 
             # 指令执行后：传播拦截状态
             if floor._event_intercepting:
@@ -1022,6 +1051,20 @@ def _execute_instruction(
 
     # ── battle（剧情强制战斗，绕过 canBattle 拦截）─────────────────────────────
     if t == "battle":
+        loc = instr.get("loc")
+        if loc is not None:
+            # 带 loc：源码 for 循环里 `if core.getBlockId(x,y)!==null` 的逐场存活判断
+            # （怪先 move 到战斗点再 battle，sim 直接对源格存活怪结算）。见 mechanics §M.7。
+            lx, ly = loc[0], loc[1]
+            tile = state.floor.entities[ly][lx]
+            if tile == 0:
+                return  # getBlockId===null：该格怪已清 → 本场不触发、零伤
+            eid = state.floor._tile_to_enemy.get(tile)
+            if eid:
+                _forced_battle(state, eid)
+                state.floor.entities[ly][lx] = 0  # 战后清格（等效 move keep 把怪移走）
+            return
+        # 无 loc：无条件强制战斗（MT32），保持原语义不变
         eid = instr.get("id")
         if eid:
             _forced_battle(state, eid)
@@ -1063,8 +1106,26 @@ def _execute_instruction(
     # ── changeFloor ───────────────────────────────────────────────────────────
     if t == "changeFloor":
         target_id = _resolve_floor_id(state, instr.get("floorId", ""))
-        loc = instr.get("loc", [0, 0])
-        state.pending_floor_change = {"floor_id": target_id, "x": loc[0], "y": loc[1]}
+        loc = instr.get("loc")
+        stair = instr.get("stair")
+        if loc is not None:
+            tx, ty = loc[0], loc[1]
+        elif stair is not None:
+            # 无 loc 有 stair：落点 = 目标层对应楼梯坐标（downFloor/upFloor 字段），
+            # 与 fly 魔杖/_apply_stair_change 同一套解析（读目标层 down_floor/up_floor）。见 §I.3.2。
+            if not _load_floor_if_needed(state, target_id):
+                return  # 目标层未提取（范围外，如 MT42+）：切层失败，不默认 (0,0)
+            tgt = state.floors[target_id]
+            coords = tgt.down_floor if stair == "downFloor" else tgt.up_floor
+            if not coords:
+                raise ValueError(
+                    f"changeFloor: 目标层 {target_id} 缺 {stair} 坐标，落点无法解析")
+            tx, ty = coords[0], coords[1]
+        else:
+            # 既无 loc 又无 stair：落点无法确定，绝不静默默认 (0,0)（铁律：未知机制报错）。
+            raise ValueError(
+                f"changeFloor 缺 loc 且缺 stair（floorId={instr.get('floorId')!r}），落点无法确定")
+        state.pending_floor_change = {"floor_id": target_id, "x": tx, "y": ty}
         return
 
     # ── move / generateMove ───────────────────────────────────────────────────
@@ -1347,6 +1408,8 @@ def _set_value(state: GameState, name: str, value, operator: str | None = None) 
             if operator == "+=":   hero.def_ += num
             elif operator == "-=": hero.def_ -= num
             else:                  hero.def_ = num
+        if hero.hp <= 0:
+            state.dead = True   # 事件扣血致死 → 冻结于死亡点（§M.8）
 
 
 # ─── autoEvent ───────────────────────────────────────────────────────────────

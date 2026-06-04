@@ -146,6 +146,74 @@ def test_mt40_boss_can_kill_underpowered_hero():
     assert st.hero.hp <= 0                        # 强制开打致死，验证未走普通拦截分支
 
 
+# 红门以上 13 格存活怪坐标（顺序即 events[6,7] 源码 a 数组，见 §M.7）
+MT40_BOSS_CELLS = [(5, 4), (4, 4), (3, 4), (7, 4), (8, 4), (9, 4),
+                   (4, 2), (3, 2), (2, 2), (8, 2), (9, 2), (10, 2), (6, 1)]
+
+
+def test_mt40_boss_all_cleared_zero_damage():
+    """§M.7 核心(本存档 route 的真实场景)：红门以上 13 格全部预清 →
+    踩 (6,7) 一场不打、HP/金币/击杀零变；但收尾(开上楼梯+flag:402)仍照常执行。"""
+    st = _mkstate('MT40', 100000, 10000, 10000)
+    st.hero.x, st.hero.y = 6, 6
+    f = st.floor
+    for x, y in MT40_BOSS_CELLS:
+        f.entities[y][x] = 0                      # 预清全部存活怪 → getBlockId===null
+    hp0, gold0, kc0 = st.hero.hp, st.hero.gold, st.hero.kill_count
+    st = step(st, 'D')
+    assert (st.hero.x, st.hero.y) == (6, 7)
+    assert st.hero.hp == hp0                       # 零伤
+    assert st.hero.gold == gold0                   # 无金币(没打)
+    assert st.hero.kill_count == kc0               # 零击杀
+    assert st.dead is False
+    # 收尾不受存活判断 gate：仍开上楼梯 + flag:402 放行下层
+    assert st.floor.terrain[1][6] == 87
+    assert st.hero.flags.get('402') is True
+
+
+def test_mt40_boss_partial_only_alive_fight():
+    """§M.7 部分清场：只留 2 格存活(其余预清) → 仅这 2 场触发强制战斗。"""
+    st = _mkstate('MT40', 100000, 10000, 10000)
+    st.hero.x, st.hero.y = 6, 6
+    f = st.floor
+    keep_alive = {(2, 2), (6, 1)}                  # swordsman + yellowKnight 留活
+    for x, y in MT40_BOSS_CELLS:
+        if (x, y) not in keep_alive:
+            f.entities[y][x] = 0
+    kc0 = st.hero.kill_count
+    st = step(st, 'D')
+    assert st.hero.kill_count == kc0 + 2           # 仅 2 场(存活才打)
+
+
+def test_death_hard_termination_freezes_state():
+    """§M.8：强制战斗致死后 state.dead=True，后续任何 token(移动/拾取/用道具/切层)
+    全部 no-op、状态冻结在死亡点。"""
+    st = _mkstate('MT40', 10, 100, 0)              # 血薄，必死于首场鬼战士
+    st.hero.x, st.hero.y = 6, 6
+    st = step(st, 'D')                              # 踩 (6,7) → 首场强制战斗致死
+    assert st.dead is True
+    assert st.hero.hp <= 0
+    snap = (st.hero.x, st.hero.y, st.hero.hp, st.hero.gold,
+            st.hero.kill_count, st.current_floor)
+    for tok in ('R', 'L', 'U', 'D', 'ITEM:50', 'FLOOR:MT1'):
+        st = step(st, tok)
+        assert st.dead is True
+        assert (st.hero.x, st.hero.y, st.hero.hp, st.hero.gold,
+                st.hero.kill_count, st.current_floor) == snap
+
+
+def test_death_midwave_halts_remaining_boss_battles():
+    """§M.8：强制战斗序列中途致死 → 事件列剩余指令不再执行
+    (不再打后续怪、不 setBlock 楼梯、不置 flag:402)。"""
+    st = _mkstate('MT40', 10, 100, 0)
+    st.hero.x, st.hero.y = 6, 6
+    st = step(st, 'D')
+    assert st.dead is True
+    assert st.hero.kill_count <= 1                  # 死在首场，后续 12 场未打
+    assert st.floor.terrain[1][6] != 87             # 上楼梯 setBlock 未执行(事件已冻结)
+    assert st.hero.flags.get('402') is not True     # flag:402 未置 → 未放行下楼
+
+
 # ─── snow 冰魔法：清英雄四方向相邻 lava → 永久空地（§K.4，数据驱动 lava tile）──────────
 def test_snow_clears_adjacent_lava():
     """ITEM:54(snow) 把英雄四方相邻的 lava(tile 经 _id_to_tile_full['lava'] 解析)永久变 0；

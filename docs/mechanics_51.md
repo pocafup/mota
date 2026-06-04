@@ -1286,6 +1286,46 @@ prologue 演出 + 强制战斗，逐条：
 - MT29 events["6,2"]（踩小偷格）：`if (searchBlock('whiteWall2','MT23').length > 0)` → 再判 `flag:额外功能开关`（**默认关**）→ 默认只出对话、**不开** (6,3) 暗道；MT23 的 whiteWall 全被「还原」后（length==0）才直接开暗道（move + 传送 MT2）。
 - **原版**：碰过 MT23 所有 whiteWall 才能走 MT29 暗道；**当前版本无需完成**，暗道是通往 MT2 的**支线捷径，主线不依赖**。模拟器实现 searchBlock 基本语义即可（默认 length>0 → 暗道不开 → 主线走正常楼梯）。
 
+### M.7 MT40 骑士队长 boss = **「红门以上存活怪才打」**（区别于 MT32 的无条件强制战斗）
+
+> ⚠️ **MT32 与 MT40 都是 force 强制战斗，但触发条件不同，不可混为一谈。**
+> - **MT32**：单场 boss，无条件触发（§M.2）。
+> - **MT40**：踩 (6,7) 触发对**红门以上所有「还活着」的怪**逐个先攻强制战斗；**已死/已清的怪不参与、零伤**。
+
+**源码依据**（`MT40.json` events["6,7"] 内 `{"type":"function"}` 的原始 JS，已从 live engine 提取核对）：
+
+```js
+var a = [[5,4],[4,4],[3,4], [7,4],[8,4],[9,4], [4,2],[3,2],[2,2], [8,2],[9,2],[10,2], [6,1]];
+for (var i = 0; i <= 12; i++) {
+    var x = a[i][0], y = a[i][1];
+    if (core.getBlockId(x, y) !== null) {            // ← 逐场存活判断：该格还有怪才打
+        // sleep + move(把 a[i] 的怪移到 (6,7)) + battle(loc:[6,7])
+    }
+    // i===2/5/8/11 队长台词；i===12 收尾(setBlock upFloor[6,1] 等纯演出)
+}
+core.insertAction(todo);
+```
+
+- `a` 的 13 格 = 红门(83,在(6,8))以上全部怪：ghostSkeleton×3 / soldier×3 / swordsman×3 / redKnight×3 / yellowKnight×1。
+- `if (core.getBlockId(x,y) !== null)`：该格仍有实体（怪没被提前清掉）才生成「移动+战斗」；**已清格 `getBlockId===null` 直接跳过**。
+- 怪先 move 到 (6,7) 再 `battle`，是演出；对状态的唯一影响 = 与该怪打一场（force + special=1 先攻）。
+- 全程 setEnemy special=1 先攻、打完 special=0 还原（同 §M.3）。战后 setBlock 把 12 格覆为掉落、setBlock 87 在 (6,1) 开上楼梯、setValue flag:402=true（events[6,1] 凭此放行下一层）。
+- **本存档 route**：用 centerFly 瞬移到 (2,1) 后，先用普通走格清光红门以上全部 13 个怪，再踩 (6,7) → 13 格全 `getBlockId===null` → **一场都不打、HP 零损**（真值 tok4103 后 HP 恒为 262）。
+
+**模拟器实现**（`data` 展开为带 `loc` 的 battle 指令 + 引擎按存活判断派发）：
+1. `MT40.json` events["6,7"] 的 13 场 battle 各带 `loc:[x,y]`（怪原格，顺序即源码 `a`）。
+2. `_execute_instruction` 的 `battle` 分支：**带 `loc`** → 读 `entities[ly][lx]`，为 0（已清，`getBlockId===null`）则**跳过零伤**；非 0 则取该格怪 `_forced_battle` 后清格。**无 `loc`**（MT32）→ 保持无条件强制战斗，语义零改动。
+3. ∴ MT32 不可达性铁律不受波及（`test_force_battle_mt32.py` 全套看守）。
+
+### M.8 勇者死亡（HP≤0）= 硬终止（game over），之后一切不执行
+
+> 引擎机制：`hp <= 0` 立即 `core.events.lose()`，游戏结束。重放路线不会死，但 **solver 启发式搜索会探索大量会死的路线**，死亡必须是硬终止，否则搜索会在「负血英雄」上继续推演出虚假路径。
+
+- **`GameState.dead`**（默认 `False`）：任何 HP 结算后若 `hp <= 0` 即置 `True`。死亡来源 = **绕过 canBattle 拦截的扣血**：强制战斗（§M.1/§M.7）、事件扣血（setValue status:hp）、poison/地形伤等。
+- **`step()` 入口检查**：`dead` 为真 → 对一切 token **no-op**（原样返回，不战斗/拾取/切层/触发事件），状态冻结在死亡点。
+- **冻结在死亡点**：强制战斗序列中某一场致死 → `_forced_battle` 当场置 `dead`，`_execute_event_list` 检测到 `dead` **立即停止**执行事件列剩余指令（不再打后续怪、不 setBlock）。
+- **与「打不过原地不动」(§M.4.4) 的关系**：普通走格战斗的 `damage >= hp` 拦截**不变**——普通战斗永远不会致死（打不过就原地不动）；**能致死的只有 force/事件/地形**这些绕过拦截的来源，故仅在这些结算点查 `dead`。
+
 ---
 
 ## K. 冰魔法（snow）与岩浆通行机制
