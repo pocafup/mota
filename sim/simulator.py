@@ -567,10 +567,10 @@ def _handle_oldman(state: GameState, x: int, y: int) -> None:
     '对话' commonEvent 按 flag:arg1(楼层号) switch 显示提示(MT2 给1000金币/MT3 给手册/
     其余纯提示)，末尾 hide loc=[arg2,arg3] remove → 老人消失。英雄不移入(撞 NPC)，
     需下个同向 token 才走入。MT2/MT3 因 '有选择的对话'=true 会挂 choices 拦截(等 CHOICE
-    token)；其余层为纯文字串(had_sync_anim=False → 跳过、不拦截、不消费额外 token)。"""
+    token)；其余层为纯文字串(回放中自动翻页、不拦截、不消费额外 token)。"""
     floor_num = int(state.current_floor[2:])  # MT18→18，同引擎 floorId.substring(2)
     instr = {"type": "insert", "name": "对话", "args": [floor_num, x, y, 0]}
-    _execute_instruction(state, instr, x, y, {"had_sync_anim": False})
+    _execute_instruction(state, instr, x, y, {})
 
 
 # ─── Combat ──────────────────────────────────────────────────────────────────
@@ -731,32 +731,23 @@ def _execute_event_list(
     ctx: dict | None = None,
 ) -> None:
     if ctx is None:
-        ctx = {"had_sync_anim": False}
+        ctx = {}
     floor = state.floor
     for i, instr in enumerate(event_list):
         if isinstance(instr, str):
-            if ctx.get("had_sync_anim"):
-                # 同步动画之后的对话 → 拦截型事件
-                floor._event_intercepting = True
-                floor._event_pending_instrs = list(event_list[i + 1:])
-                floor._event_pending_choices = []
-                floor._event_pending_xy = (event_x, event_y)
-                return
+            # 纯文字对话在回放中自动翻页、不消费 route token、不拦截事件流（引擎 replayActions
+            # 无文字处理器，文字非 token 类型；仅 choices 读取选择 token）。故无条件跳过。
             continue
         if isinstance(instr, dict):
             t = instr.get("type", "")
 
-            # choices 型事件：始终拦截（不需要 sync anim 前置）
+            # choices 型事件：始终拦截（读取 CHOICE 选择 token）
             if t == "choices":
                 floor._event_intercepting = True
                 floor._event_pending_choices = list(instr.get("choices", []))
                 floor._event_pending_instrs = list(event_list[i + 1:])
                 floor._event_pending_xy = (event_x, event_y)
                 return
-
-            # 同步的 move → 进入阻塞动画上下文（generateMove 是 h5mota 异步动画指令，不阻塞事件流）
-            if t == "move" and not instr.get("async", False):
-                ctx["had_sync_anim"] = True
 
             _execute_instruction(state, instr, event_x, event_y, ctx)
 
@@ -1073,6 +1064,18 @@ def _eval_single(part: str, state: GameState) -> bool:
         return True
     if part == "false":
         return False
+
+    # flag:KEY op rhs（带运算符的 flag 比较）——须先于下面的裸布尔分支匹配，
+    # 否则裸分支会把 "30 == 5" 整串当成 flag 名查找而恒为 False。
+    # 未设的 flag 当 0（同引擎 core.getFlag(name, 0)），口径与 _eval_value_expr 一致。
+    m = re.match(r"\(?flag:(.+?)\s*(>=|<=|==|!=|>|<)\s*(.+?)\)?$", part)
+    if m:
+        key, op, rhs = m.group(1).strip(), m.group(2), m.group(3).strip()
+        lhs_raw = hero.flags.get(key, 0)
+        lhs = int(lhs_raw) if isinstance(lhs_raw, (int, float)) else 0
+        rhs_val = _eval_value_expr(rhs, state)
+        return {">=": lhs >= rhs_val, "<=": lhs <= rhs_val, ">": lhs > rhs_val,
+                "<": lhs < rhs_val, "==": lhs == rhs_val, "!=": lhs != rhs_val}[op]
 
     if part.startswith("flag:"):
         return bool(hero.flags.get(part[5:], False))
