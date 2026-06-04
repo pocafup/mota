@@ -5,6 +5,21 @@
 
 ---
 
+## 🟢 多格boss footprint + setBlock跨层 + getBlock条件 + centerFly：token3371/3704/4012 转绿（2026-06-04，25/26 检查点 PASS，commit c33934d）
+
+- **进展**：**25/26 检查点 PASS**，**MT1–MT40 基本逐 token 对齐**，**64/64 测试全绿**。本段实现四件事，一次性消掉级联 FAIL 中的三个（3371/3704/4012）：
+  1. **多格 boss footprint（魔龙/章鱼九宫格占位）**：`monsters.json` 给 magicDragon(257)/octopus(258) 声明 `footprint`（3×3，锚点=怪实体格向上展开两行），活着时九格全 noPass，只能站锚点正下方朝上触发战斗；afterBattle `hide remove` 清占位（配套清 terrain 层）。`tiles.json` 把 17 订正回 `airwall`（noPass:true 保留）。→ **token3371/3704 转绿**。
+  2. **setBlock 跨层**：`setBlock` 支持 `floorId` 指向非当前层（按需加载目标层），数字 / 字符串 number 两种写法（字符串走 `_id_to_tile_full` 解析），区分 entity / terrain 层落子。
+  3. **getBlock 裸条件分支（口径已坐实）**：`_eval_single` 新增 `core.getBlock(x,y) ===/!== null`（区别于 getBlockId）。口径：blockObjs 收录所有 tile≠0 的格（墙/门/楼梯/地形/装饰/怪/道具），tile==0→null；双层模型映射为 **entity≠0 或 terrain≠0 即非 null**。用于 MT39 `autoEvent[8,4]` 九宫格条件（开两扇黄门后 (4,4) 黄门→`openDoor`+`setBlock centerFly3`）。
+  4. **centerFly（ITEM:50 瞬移，消耗性已坐实）**：中心对称瞬移到 (W-1-x, H-1-y)，**不切层**；canUseItemEffect 校验对称点 `getBlockId ∈ {null,'none','airwall'}`（airwall 可落——与移动 noPass 是两套判定）；消耗性：`items.json` centerFly `cls=tools`，`_afterUseItem` 源码 tools 用即 −1（§K.2），故"配 3 用 3"是消耗必然、非巧合。centerFly3(331) 拾取给 3 个 centerFly。→ 勇者 tok3925 拿 centerFly3、tok4085 瞬移进 MT40 段、黄钥匙不多耗 → **token4012 转绿**。
+- **唯一 FAIL — token4141**（下个会话起点）：真值 `MT41(6,2) HP=262 ATK=182 DEF=134 黄=7`，sim 停在 `MT40(7,9) HP=1246 黄=4`（连楼层都没进对）。新窗口 **token[4012→4141]（129 步）逐笔全状态账**已写入 `checkpoint_ledger.txt`。**三个待玩家裁定材料**（铁律：不自行猜根因 / 改真值 / 改断言凑绿）：
+  - **(a) tok4075 `L` @ MT36(1,11) HP+800**：这 +800 是什么？（祭坛 / 祝福 / 血瓶？还是误算）
+  - **(b) tok4084–4095 MT40↔MT39 往返**：`FLOOR:MT40` 后又 R 到 MT39(11,10)、再 D 回 MT40——这段楼梯 / 边界相邻行为 sim 是否建模对了？
+  - **(c) 真值黄钥匙多 3 把（真值 7 vs sim 4）**：真实路线在 sim 未到达的格拿了 3 把黄钥匙 → sim 路线在窗口内提前分叉，没走到那些格。
+- **G7（MT41 跨层机关 `events[10,2]`，setBlock destruct 语义 + hasVisitedFloor 条件）仍挂待确认**（详见 memory/mechanics_status.md）。token4141 要进 MT41，**大概率与 G7 相关**，下个会话处理。
+
+---
+
 ## 🟢 扩层 MT34–MT41 + token2965 转绿（2026-06-04，22/26 检查点 PASS，commit 533c2e2）
 
 - **进展**：**22/26 检查点 PASS**，**MT1–MT33 全程逐 token 对齐 + MT34–MT41 八层已提取**，**64/64 测试全绿**。本段三件事：扩层 MT34–MT41（含原始 raw capture 落盘）、实现 snow 冰魔法（§K）、补 MT40 骑士队长 boss 13 连战测试（§M）；核心是**修正 flower(168) 误标 noPass**。
