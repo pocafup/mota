@@ -124,23 +124,23 @@
     "227": {"id":"redKnight","_monster":"redKnight"},
     "228": {"id":"darkKnight","_monster":"darkKnight"},
     "229": {"id":"blackKing","_monster":"blackKing"},
-    "230": {"id":"blueKnight","_monster":"blueKnight"},
-    "234": {"id":"poisonBat","_monster":"poisonBat"},
+    "230": {"id":"yellowKing","_monster":"yellowKing"},
+    "234": {"id":"poisonSkeleton","_monster":"poisonSkeleton"},
     "237": {"id":"skeletonPriest","_monster":"skeletonPriest"},
-    "238": {"id":"badHero","_monster":"badHero"},
-    "239": {"id":"redKing","_monster":"redKing"},
-    "240": {"id":"whiteKing","_monster":"whiteKing"},
-    "241": {"id":"blackMagician","_monster":"blackMagician"},
-    "242": {"id":"silverSlime","_monster":"silverSlime"},
-    "243": {"id":"swordEmperor","_monster":"swordEmperor"},
-    "245": {"id":"redSwordsman","_monster":"redSwordsman"},
-    "246": {"id":"poisonZombie","_monster":"poisonZombie"},
-    "247": {"id":"magicDragon","_monster":"magicDragon"},
-    "248": {"id":"octopus","_monster":"octopus"},
-    "249": {"id":"evilBat","_monster":"evilBat"},
-    "250": {"id":"redWizardRepulse","_monster":"redWizardRepulse"},
-    "251": {"id":"steelGuard","_monster":"steelGuard"},
-    "258": {"id":"steelRock","_monster":"steelRock","_note":"高级石头人（MT15 boss，需矿镐或高ATK击杀）"}
+    "238": {"id":"skeletonKing","_monster":"skeletonKing"},
+    "239": {"id":"skeletonWizard","_monster":"skeletonWizard"},
+    "240": {"id":"redSkeletonCaption","_monster":"redSkeletonCaption"},
+    "241": {"id":"badHero","_monster":"badHero"},
+    "242": {"id":"demon","_monster":"demon"},
+    "243": {"id":"demonPriest","_monster":"demonPriest"},
+    "245": {"id":"redKing","_monster":"redKing"},
+    "246": {"id":"whiteKing","_monster":"whiteKing"},
+    "247": {"id":"blackMagician","_monster":"blackMagician"},
+    "248": {"id":"silverSlime","_monster":"silverSlime"},
+    "249": {"id":"swordEmperor","_monster":"swordEmperor"},
+    "250": {"id":"whiteHornSlime","_monster":"whiteHornSlime"},
+    "251": {"id":"badPrincess","_monster":"badPrincess"},
+    "258": {"id":"octopus","_monster":"octopus","_note":"大章鱼（MT15(6,6)，hp1200/atk180/def20；历史数据曾误标 steelRock，引擎权威=octopus，玩家已确认）"}
   },
 
   "npcs": {
@@ -149,6 +149,7 @@
     "123": {"id":"thief","name":"小偷","_note":"小偷 NPC（MT2 越狱场景）"},
     "124": {"id":"specialTrader","name":"商人","_note":"特殊商人 NPC（MT2 祝福事件）"},
     "127": {"id":"king","name":"作者","_note":"作者变更日志 NPC（MT1 版本历史事件）"},
-    "131": {"id":"blueShop","name":"祭坛","_commonEvent":"商店","_note":"祭坛 NPC，触发 '商店' 事件（见 shops.json）"}
+    "131": {"id":"blueShop","name":"祭坛","_commonEvent":"商店","_note":"祭坛 NPC，触发 '商店' 事件（见 shops.json）"},
+    "132": {"id":"princess","name":"公主","_note":"洋娃娃/公主 NPC（MT26(6,6)，引擎 cls=npcs）。撞→events[6,6]：首次设 flag:营救公主=true 并改写 MT24 第6列(6,2/6,3/6,4 设地板)，之后踩 MT24(6,2) 可传送 MT50(6,7)"}
   }
 }

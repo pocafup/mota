@@ -1,0 +1,63 @@
+{
+  "_comment": "来源: core.floors['MT21'] (live engine, Playwright 提取)。events 存原始 h5mota 脚本。",
+  "floorId": "MT21",
+  "title": "魔塔 第21层",
+  "width": 13,
+  "height": 13,
+  "ratio": 3,
+  "bgm": "section3.mp3",
+  "downFloor": [6, 2],
+  "upFloor": [6, 10],
+  "_map_note": "map[y][x]，0=地板，1=墙。tile ID 含义见 tiles.json。",
+  "map": [
+    [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+    [1, 0, 0, 0, 0, 0, 88, 0, 0, 0, 0, 0, 1],
+    [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+    [1, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 1],
+    [1, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 1],
+    [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+    [1, 0, 0, 0, 0, 0, 121, 0, 0, 0, 0, 0, 1],
+    [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+    [1, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 1],
+    [1, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 1],
+    [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+    [1, 0, 0, 0, 0, 0, 87, 0, 0, 0, 0, 0, 1],
+    [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+  ],
+  "_map_entities": {
+    "_comment": "从 map 推导的实体位置，模拟器从 map+tiles.json 动态解析。",
+    "npcs_terrain": {
+      "oldman(121)": [
+        "(6,6)"
+      ]
+    },
+    "stairs_terrain": {
+      "downFloor(88)": [
+        "(6,1)"
+      ],
+      "upFloor(87)": [
+        "(6,11)"
+      ]
+    }
+  },
+  "changeFloor": {
+    "6,11": {
+      "floorId": ":next",
+      "stair": "downFloor",
+      "time": 0
+    },
+    "6,1": {
+      "floorId": ":before",
+      "stair": "upFloor",
+      "time": 0
+    }
+  },
+  "events": {},
+  "firstArrive": [],
+  "eachArrive": [],
+  "afterGetItem": {},
+  "afterBattle": {},
+  "autoEvent": {},
+  "afterOpenDoor": {},
+  "cannotMove": {}
+}

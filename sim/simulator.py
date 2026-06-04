@@ -992,6 +992,15 @@ def _eval_single(part: str, state: GameState) -> bool:
         bx, by = int(m.group(1)), int(m.group(2))
         return floor.entities[by][bx] not in floor._tile_to_entity
 
+    # core.getBlockCls(x,y) ===/!== 'enemys'：判该格当前 entity 是否敌人类。
+    # 数据驱动——敌人 tile 集合 = tiles.json enemys 段（_tile_to_enemy 键），不硬编码楼层。
+    # 仅支持 'enemys'（全 50 层唯一出现的 cls）；其它 cls 落到末尾，需要时再扩展。
+    m = re.match(r"core\.getBlockCls\((\d+),\s*(\d+)\)\s*(===|!==)\s*'(\w+)'", part)
+    if m and m.group(4) == "enemys":
+        bx, by, op = int(m.group(1)), int(m.group(2)), m.group(3)
+        is_enemy = floor.entities[by][bx] in floor._tile_to_enemy
+        return is_enemy if op == "===" else not is_enemy
+
     # status:xxx op rhs（商店 while 条件等）
     m = re.match(r'\(?status:(\w+)\s*(>=|<=|==|!=|>|<)\s*(.+?)\)?$', part)
     if m:

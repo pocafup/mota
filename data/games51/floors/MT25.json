@@ -1,0 +1,118 @@
+{
+  "_comment": "来源: core.floors['MT25'] (live engine, Playwright 提取)。events 存原始 h5mota 脚本。",
+  "floorId": "MT25",
+  "title": "魔塔 第25层",
+  "width": 13,
+  "height": 13,
+  "ratio": 3,
+  "bgm": "section3.mp3",
+  "downFloor": [2, 11],
+  "upFloor": [2, 11],
+  "_map_note": "map[y][x]，0=地板，1=墙。tile ID 含义见 tiles.json。",
+  "map": [
+    [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+    [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+    [1, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 1],
+    [1, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 1],
+    [1, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1, 0, 1],
+    [1, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 1],
+    [1, 0, 1, 0, 0, 0, 247, 0, 0, 0, 1, 0, 1],
+    [1, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 1],
+    [1, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1, 0, 1],
+    [1, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 1],
+    [1, 0, 88, 0, 1, 1, 83, 1, 1, 0, 0, 0, 1],
+    [1, 87, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+    [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+  ],
+  "_map_entities": {
+    "_comment": "从 map 推导的实体位置，模拟器从 map+tiles.json 动态解析。",
+    "monsters": {
+      "blackMagician(247)": [
+        "(6,6)"
+      ]
+    },
+    "doors": {
+      "redDoor(83)": [
+        "(6,10)"
+      ]
+    },
+    "stairs_terrain": {
+      "downFloor(88)": [
+        "(2,10)"
+      ],
+      "upFloor(87)": [
+        "(1,11)"
+      ]
+    }
+  },
+  "changeFloor": {
+    "1,11": {
+      "floorId": ":next",
+      "stair": "downFloor",
+      "time": 0
+    },
+    "2,10": {
+      "floorId": ":before",
+      "stair": "upFloor",
+      "time": 0
+    }
+  },
+  "events": {
+    "6,9": [
+      "\t[blackMagician]-杀-死-入-侵-者-",
+      {
+        "type": "hide",
+        "time": 0
+      }
+    ]
+  },
+  "firstArrive": [],
+  "eachArrive": [],
+  "afterGetItem": {},
+  "afterBattle": {
+    "6,6": [
+      {
+        "type": "playSound",
+        "name": "开关门"
+      },
+      {
+        "type": "setBlock",
+        "number": "23",
+        "loc": [
+          [4, 8]
+        ]
+      },
+      {
+        "type": "setBlock",
+        "number": "23",
+        "loc": [
+          [5, 8]
+        ]
+      },
+      {
+        "type": "setBlock",
+        "number": "23",
+        "loc": [
+          [7, 8]
+        ]
+      },
+      {
+        "type": "setBlock",
+        "number": "23",
+        "loc": [
+          [8, 8]
+        ]
+      },
+      {
+        "type": "hide",
+        "loc": [
+          [6, 9]
+        ],
+        "time": 0
+      }
+    ]
+  },
+  "autoEvent": {},
+  "afterOpenDoor": {},
+  "cannotMove": {}
+}

@@ -1,0 +1,1227 @@
+{
+  "_comment": "来源: core.floors['MT23'] (live engine, Playwright 提取)。events 存原始 h5mota 脚本。",
+  "floorId": "MT23",
+  "title": "魔塔 第23层",
+  "width": 13,
+  "height": 13,
+  "ratio": 3,
+  "bgm": "section3.mp3",
+  "downFloor": [1, 2],
+  "upFloor": [11, 2],
+  "_map_note": "map[y][x]，0=地板，1=墙。tile ID 含义见 tiles.json。",
+  "map": [
+    [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+    [1, 88, 0, 321, 321, 321, 0, 0, 0, 0, 0, 87, 1],
+    [1, 0, 321, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+    [1, 0, 321, 0, 321, 321, 0, 0, 321, 321, 321, 0, 1],
+    [1, 0, 321, 0, 0, 321, 0, 0, 321, 0, 321, 0, 1],
+    [1, 0, 321, 321, 321, 321, 0, 0, 321, 321, 321, 0, 1],
+    [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+    [1, 0, 321, 321, 321, 321, 0, 321, 321, 321, 321, 0, 1],
+    [1, 0, 321, 0, 0, 321, 0, 321, 0, 0, 0, 0, 1],
+    [1, 0, 321, 0, 0, 321, 0, 321, 321, 321, 0, 0, 1],
+    [1, 0, 321, 321, 321, 321, 0, 321, 0, 0, 0, 0, 1],
+    [1, 0, 0, 0, 0, 0, 0, 321, 0, 0, 0, 121, 1],
+    [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+  ],
+  "_map_entities": {
+    "_comment": "从 map 推导的实体位置，模拟器从 map+tiles.json 动态解析。",
+    "npcs_terrain": {
+      "whiteWall2(321)": [
+        "(3,1)",
+        "(4,1)",
+        "(5,1)",
+        "(2,2)",
+        "(2,3)",
+        "(4,3)",
+        "(5,3)",
+        "(8,3)",
+        "(9,3)",
+        "(10,3)",
+        "(2,4)",
+        "(5,4)",
+        "(8,4)",
+        "(10,4)",
+        "(2,5)",
+        "(3,5)",
+        "(4,5)",
+        "(5,5)",
+        "(8,5)",
+        "(9,5)",
+        "(10,5)",
+        "(2,7)",
+        "(3,7)",
+        "(4,7)",
+        "(5,7)",
+        "(7,7)",
+        "(8,7)",
+        "(9,7)",
+        "(10,7)",
+        "(2,8)",
+        "(5,8)",
+        "(7,8)",
+        "(2,9)",
+        "(5,9)",
+        "(7,9)",
+        "(8,9)",
+        "(9,9)",
+        "(2,10)",
+        "(3,10)",
+        "(4,10)",
+        "(5,10)",
+        "(7,10)",
+        "(7,11)"
+      ],
+      "oldman(121)": [
+        "(11,11)"
+      ]
+    },
+    "stairs_terrain": {
+      "downFloor(88)": [
+        "(1,1)"
+      ],
+      "upFloor(87)": [
+        "(11,1)"
+      ]
+    }
+  },
+  "changeFloor": {
+    "11,1": {
+      "floorId": ":next",
+      "stair": "downFloor",
+      "time": 0
+    },
+    "1,1": {
+      "floorId": ":before",
+      "stair": "upFloor",
+      "time": 0
+    }
+  },
+  "events": {
+    "3,1": {
+      "trigger": null,
+      "enable": true,
+      "noPass": true,
+      "displayDamage": true,
+      "opacity": 1,
+      "filter": {
+        "blur": 0,
+        "hue": 0,
+        "grayscale": 0,
+        "invert": false,
+        "shadow": 0
+      },
+      "data": [
+        {
+          "type": "hide",
+          "remove": true,
+          "time": 0,
+          "destruct": true
+        },
+        {
+          "type": "closeDoor",
+          "id": "yellowWall"
+        }
+      ]
+    },
+    "4,1": {
+      "trigger": null,
+      "enable": true,
+      "noPass": true,
+      "displayDamage": true,
+      "opacity": 1,
+      "filter": {
+        "blur": 0,
+        "hue": 0,
+        "grayscale": 0,
+        "invert": false,
+        "shadow": 0
+      },
+      "data": [
+        {
+          "type": "hide",
+          "remove": true,
+          "time": 0,
+          "destruct": true
+        },
+        {
+          "type": "closeDoor",
+          "id": "yellowWall"
+        }
+      ]
+    },
+    "5,1": {
+      "trigger": null,
+      "enable": true,
+      "noPass": true,
+      "displayDamage": true,
+      "opacity": 1,
+      "filter": {
+        "blur": 0,
+        "hue": 0,
+        "grayscale": 0,
+        "invert": false,
+        "shadow": 0
+      },
+      "data": [
+        {
+          "type": "hide",
+          "remove": true,
+          "time": 0,
+          "destruct": true
+        },
+        {
+          "type": "closeDoor",
+          "id": "yellowWall"
+        }
+      ]
+    },
+    "4,3": {
+      "trigger": null,
+      "enable": true,
+      "noPass": true,
+      "displayDamage": true,
+      "opacity": 1,
+      "filter": {
+        "blur": 0,
+        "hue": 0,
+        "grayscale": 0,
+        "invert": false,
+        "shadow": 0
+      },
+      "data": [
+        {
+          "type": "hide",
+          "remove": true,
+          "time": 0,
+          "destruct": true
+        },
+        {
+          "type": "closeDoor",
+          "id": "yellowWall"
+        }
+      ]
+    },
+    "5,3": {
+      "trigger": null,
+      "enable": true,
+      "noPass": true,
+      "displayDamage": true,
+      "opacity": 1,
+      "filter": {
+        "blur": 0,
+        "hue": 0,
+        "grayscale": 0,
+        "invert": false,
+        "shadow": 0
+      },
+      "data": [
+        {
+          "type": "hide",
+          "remove": true,
+          "time": 0,
+          "destruct": true
+        },
+        {
+          "type": "closeDoor",
+          "id": "yellowWall"
+        }
+      ]
+    },
+    "5,4": {
+      "trigger": null,
+      "enable": true,
+      "noPass": true,
+      "displayDamage": true,
+      "opacity": 1,
+      "filter": {
+        "blur": 0,
+        "hue": 0,
+        "grayscale": 0,
+        "invert": false,
+        "shadow": 0
+      },
+      "data": [
+        {
+          "type": "hide",
+          "remove": true,
+          "time": 0,
+          "destruct": true
+        },
+        {
+          "type": "closeDoor",
+          "id": "yellowWall"
+        }
+      ]
+    },
+    "5,5": {
+      "trigger": null,
+      "enable": true,
+      "noPass": true,
+      "displayDamage": true,
+      "opacity": 1,
+      "filter": {
+        "blur": 0,
+        "hue": 0,
+        "grayscale": 0,
+        "invert": false,
+        "shadow": 0
+      },
+      "data": [
+        {
+          "type": "hide",
+          "remove": true,
+          "time": 0,
+          "destruct": true
+        },
+        {
+          "type": "closeDoor",
+          "id": "yellowWall"
+        }
+      ]
+    },
+    "2,2": {
+      "trigger": null,
+      "enable": true,
+      "noPass": true,
+      "displayDamage": true,
+      "opacity": 1,
+      "filter": {
+        "blur": 0,
+        "hue": 0,
+        "grayscale": 0,
+        "invert": false,
+        "shadow": 0
+      },
+      "data": [
+        {
+          "type": "hide",
+          "remove": true,
+          "time": 0,
+          "destruct": true
+        },
+        {
+          "type": "closeDoor",
+          "id": "yellowWall"
+        }
+      ]
+    },
+    "2,3": {
+      "trigger": null,
+      "enable": true,
+      "noPass": true,
+      "displayDamage": true,
+      "opacity": 1,
+      "filter": {
+        "blur": 0,
+        "hue": 0,
+        "grayscale": 0,
+        "invert": false,
+        "shadow": 0
+      },
+      "data": [
+        {
+          "type": "hide",
+          "remove": true,
+          "time": 0,
+          "destruct": true
+        },
+        {
+          "type": "closeDoor",
+          "id": "yellowWall"
+        }
+      ]
+    },
+    "2,5": {
+      "trigger": null,
+      "enable": true,
+      "noPass": true,
+      "displayDamage": true,
+      "opacity": 1,
+      "filter": {
+        "blur": 0,
+        "hue": 0,
+        "grayscale": 0,
+        "invert": false,
+        "shadow": 0
+      },
+      "data": [
+        {
+          "type": "hide",
+          "remove": true,
+          "time": 0,
+          "destruct": true
+        },
+        {
+          "type": "closeDoor",
+          "id": "yellowWall"
+        }
+      ]
+    },
+    "2,4": {
+      "trigger": null,
+      "enable": true,
+      "noPass": true,
+      "displayDamage": true,
+      "opacity": 1,
+      "filter": {
+        "blur": 0,
+        "hue": 0,
+        "grayscale": 0,
+        "invert": false,
+        "shadow": 0
+      },
+      "data": [
+        {
+          "type": "hide",
+          "remove": true,
+          "time": 0,
+          "destruct": true
+        },
+        {
+          "type": "closeDoor",
+          "id": "yellowWall"
+        }
+      ]
+    },
+    "3,5": {
+      "trigger": null,
+      "enable": true,
+      "noPass": true,
+      "displayDamage": true,
+      "opacity": 1,
+      "filter": {
+        "blur": 0,
+        "hue": 0,
+        "grayscale": 0,
+        "invert": false,
+        "shadow": 0
+      },
+      "data": [
+        {
+          "type": "hide",
+          "remove": true,
+          "time": 0,
+          "destruct": true
+        },
+        {
+          "type": "closeDoor",
+          "id": "yellowWall"
+        }
+      ]
+    },
+    "4,5": {
+      "trigger": null,
+      "enable": true,
+      "noPass": true,
+      "displayDamage": true,
+      "opacity": 1,
+      "filter": {
+        "blur": 0,
+        "hue": 0,
+        "grayscale": 0,
+        "invert": false,
+        "shadow": 0
+      },
+      "data": [
+        {
+          "type": "hide",
+          "remove": true,
+          "time": 0,
+          "destruct": true
+        },
+        {
+          "type": "closeDoor",
+          "id": "yellowWall"
+        }
+      ]
+    },
+    "8,3": {
+      "trigger": null,
+      "enable": true,
+      "noPass": true,
+      "displayDamage": true,
+      "opacity": 1,
+      "filter": {
+        "blur": 0,
+        "hue": 0,
+        "grayscale": 0,
+        "invert": false,
+        "shadow": 0
+      },
+      "data": [
+        {
+          "type": "hide",
+          "remove": true,
+          "time": 0,
+          "destruct": true
+        },
+        {
+          "type": "closeDoor",
+          "id": "yellowWall"
+        }
+      ]
+    },
+    "9,3": {
+      "trigger": null,
+      "enable": true,
+      "noPass": true,
+      "displayDamage": true,
+      "opacity": 1,
+      "filter": {
+        "blur": 0,
+        "hue": 0,
+        "grayscale": 0,
+        "invert": false,
+        "shadow": 0
+      },
+      "data": [
+        {
+          "type": "hide",
+          "remove": true,
+          "time": 0,
+          "destruct": true
+        },
+        {
+          "type": "closeDoor",
+          "id": "yellowWall"
+        }
+      ]
+    },
+    "10,3": {
+      "trigger": null,
+      "enable": true,
+      "noPass": true,
+      "displayDamage": true,
+      "opacity": 1,
+      "filter": {
+        "blur": 0,
+        "hue": 0,
+        "grayscale": 0,
+        "invert": false,
+        "shadow": 0
+      },
+      "data": [
+        {
+          "type": "hide",
+          "remove": true,
+          "time": 0,
+          "destruct": true
+        },
+        {
+          "type": "closeDoor",
+          "id": "yellowWall"
+        }
+      ]
+    },
+    "10,4": {
+      "trigger": null,
+      "enable": true,
+      "noPass": true,
+      "displayDamage": true,
+      "opacity": 1,
+      "filter": {
+        "blur": 0,
+        "hue": 0,
+        "grayscale": 0,
+        "invert": false,
+        "shadow": 0
+      },
+      "data": [
+        {
+          "type": "hide",
+          "remove": true,
+          "time": 0,
+          "destruct": true
+        },
+        {
+          "type": "closeDoor",
+          "id": "yellowWall"
+        }
+      ]
+    },
+    "10,5": {
+      "trigger": null,
+      "enable": true,
+      "noPass": true,
+      "displayDamage": true,
+      "opacity": 1,
+      "filter": {
+        "blur": 0,
+        "hue": 0,
+        "grayscale": 0,
+        "invert": false,
+        "shadow": 0
+      },
+      "data": [
+        {
+          "type": "hide",
+          "remove": true,
+          "time": 0,
+          "destruct": true
+        },
+        {
+          "type": "closeDoor",
+          "id": "yellowWall"
+        }
+      ]
+    },
+    "9,5": {
+      "trigger": null,
+      "enable": true,
+      "noPass": true,
+      "displayDamage": true,
+      "opacity": 1,
+      "filter": {
+        "blur": 0,
+        "hue": 0,
+        "grayscale": 0,
+        "invert": false,
+        "shadow": 0
+      },
+      "data": [
+        {
+          "type": "hide",
+          "remove": true,
+          "time": 0,
+          "destruct": true
+        },
+        {
+          "type": "closeDoor",
+          "id": "yellowWall"
+        }
+      ]
+    },
+    "8,5": {
+      "trigger": null,
+      "enable": true,
+      "noPass": true,
+      "displayDamage": true,
+      "opacity": 1,
+      "filter": {
+        "blur": 0,
+        "hue": 0,
+        "grayscale": 0,
+        "invert": false,
+        "shadow": 0
+      },
+      "data": [
+        {
+          "type": "hide",
+          "remove": true,
+          "time": 0,
+          "destruct": true
+        },
+        {
+          "type": "closeDoor",
+          "id": "yellowWall"
+        }
+      ]
+    },
+    "8,4": {
+      "trigger": null,
+      "enable": true,
+      "noPass": true,
+      "displayDamage": true,
+      "opacity": 1,
+      "filter": {
+        "blur": 0,
+        "hue": 0,
+        "grayscale": 0,
+        "invert": false,
+        "shadow": 0
+      },
+      "data": [
+        {
+          "type": "hide",
+          "remove": true,
+          "time": 0,
+          "destruct": true
+        },
+        {
+          "type": "closeDoor",
+          "id": "yellowWall"
+        }
+      ]
+    },
+    "2,7": {
+      "trigger": null,
+      "enable": true,
+      "noPass": true,
+      "displayDamage": true,
+      "opacity": 1,
+      "filter": {
+        "blur": 0,
+        "hue": 0,
+        "grayscale": 0,
+        "invert": false,
+        "shadow": 0
+      },
+      "data": [
+        {
+          "type": "hide",
+          "remove": true,
+          "time": 0,
+          "destruct": true
+        },
+        {
+          "type": "closeDoor",
+          "id": "yellowWall"
+        }
+      ]
+    },
+    "3,7": {
+      "trigger": null,
+      "enable": true,
+      "noPass": true,
+      "displayDamage": true,
+      "opacity": 1,
+      "filter": {
+        "blur": 0,
+        "hue": 0,
+        "grayscale": 0,
+        "invert": false,
+        "shadow": 0
+      },
+      "data": [
+        {
+          "type": "hide",
+          "remove": true,
+          "time": 0,
+          "destruct": true
+        },
+        {
+          "type": "closeDoor",
+          "id": "yellowWall"
+        }
+      ]
+    },
+    "5,7": {
+      "trigger": null,
+      "enable": true,
+      "noPass": true,
+      "displayDamage": true,
+      "opacity": 1,
+      "filter": {
+        "blur": 0,
+        "hue": 0,
+        "grayscale": 0,
+        "invert": false,
+        "shadow": 0
+      },
+      "data": [
+        {
+          "type": "hide",
+          "remove": true,
+          "time": 0,
+          "destruct": true
+        },
+        {
+          "type": "closeDoor",
+          "id": "yellowWall"
+        }
+      ]
+    },
+    "4,7": {
+      "trigger": null,
+      "enable": true,
+      "noPass": true,
+      "displayDamage": true,
+      "opacity": 1,
+      "filter": {
+        "blur": 0,
+        "hue": 0,
+        "grayscale": 0,
+        "invert": false,
+        "shadow": 0
+      },
+      "data": [
+        {
+          "type": "hide",
+          "remove": true,
+          "time": 0,
+          "destruct": true
+        },
+        {
+          "type": "closeDoor",
+          "id": "yellowWall"
+        }
+      ]
+    },
+    "5,8": {
+      "trigger": null,
+      "enable": true,
+      "noPass": true,
+      "displayDamage": true,
+      "opacity": 1,
+      "filter": {
+        "blur": 0,
+        "hue": 0,
+        "grayscale": 0,
+        "invert": false,
+        "shadow": 0
+      },
+      "data": [
+        {
+          "type": "hide",
+          "remove": true,
+          "time": 0,
+          "destruct": true
+        },
+        {
+          "type": "closeDoor",
+          "id": "yellowWall"
+        }
+      ]
+    },
+    "5,9": {
+      "trigger": null,
+      "enable": true,
+      "noPass": true,
+      "displayDamage": true,
+      "opacity": 1,
+      "filter": {
+        "blur": 0,
+        "hue": 0,
+        "grayscale": 0,
+        "invert": false,
+        "shadow": 0
+      },
+      "data": [
+        {
+          "type": "hide",
+          "remove": true,
+          "time": 0,
+          "destruct": true
+        },
+        {
+          "type": "closeDoor",
+          "id": "yellowWall"
+        }
+      ]
+    },
+    "5,10": {
+      "trigger": null,
+      "enable": true,
+      "noPass": true,
+      "displayDamage": true,
+      "opacity": 1,
+      "filter": {
+        "blur": 0,
+        "hue": 0,
+        "grayscale": 0,
+        "invert": false,
+        "shadow": 0
+      },
+      "data": [
+        {
+          "type": "hide",
+          "remove": true,
+          "time": 0,
+          "destruct": true
+        },
+        {
+          "type": "closeDoor",
+          "id": "yellowWall"
+        }
+      ]
+    },
+    "2,8": {
+      "trigger": null,
+      "enable": true,
+      "noPass": true,
+      "displayDamage": true,
+      "opacity": 1,
+      "filter": {
+        "blur": 0,
+        "hue": 0,
+        "grayscale": 0,
+        "invert": false,
+        "shadow": 0
+      },
+      "data": [
+        {
+          "type": "hide",
+          "remove": true,
+          "time": 0,
+          "destruct": true
+        },
+        {
+          "type": "closeDoor",
+          "id": "yellowWall"
+        }
+      ]
+    },
+    "2,9": {
+      "trigger": null,
+      "enable": true,
+      "noPass": true,
+      "displayDamage": true,
+      "opacity": 1,
+      "filter": {
+        "blur": 0,
+        "hue": 0,
+        "grayscale": 0,
+        "invert": false,
+        "shadow": 0
+      },
+      "data": [
+        {
+          "type": "hide",
+          "remove": true,
+          "time": 0,
+          "destruct": true
+        },
+        {
+          "type": "closeDoor",
+          "id": "yellowWall"
+        }
+      ]
+    },
+    "2,10": {
+      "trigger": null,
+      "enable": true,
+      "noPass": true,
+      "displayDamage": true,
+      "opacity": 1,
+      "filter": {
+        "blur": 0,
+        "hue": 0,
+        "grayscale": 0,
+        "invert": false,
+        "shadow": 0
+      },
+      "data": [
+        {
+          "type": "hide",
+          "remove": true,
+          "time": 0,
+          "destruct": true
+        },
+        {
+          "type": "closeDoor",
+          "id": "yellowWall"
+        }
+      ]
+    },
+    "3,10": {
+      "trigger": null,
+      "enable": true,
+      "noPass": true,
+      "displayDamage": true,
+      "opacity": 1,
+      "filter": {
+        "blur": 0,
+        "hue": 0,
+        "grayscale": 0,
+        "invert": false,
+        "shadow": 0
+      },
+      "data": [
+        {
+          "type": "hide",
+          "remove": true,
+          "time": 0,
+          "destruct": true
+        },
+        {
+          "type": "closeDoor",
+          "id": "yellowWall"
+        }
+      ]
+    },
+    "4,10": {
+      "trigger": null,
+      "enable": true,
+      "noPass": true,
+      "displayDamage": true,
+      "opacity": 1,
+      "filter": {
+        "blur": 0,
+        "hue": 0,
+        "grayscale": 0,
+        "invert": false,
+        "shadow": 0
+      },
+      "data": [
+        {
+          "type": "hide",
+          "remove": true,
+          "time": 0,
+          "destruct": true
+        },
+        {
+          "type": "closeDoor",
+          "id": "yellowWall"
+        }
+      ]
+    },
+    "7,7": {
+      "trigger": null,
+      "enable": true,
+      "noPass": true,
+      "displayDamage": true,
+      "opacity": 1,
+      "filter": {
+        "blur": 0,
+        "hue": 0,
+        "grayscale": 0,
+        "invert": false,
+        "shadow": 0
+      },
+      "data": [
+        {
+          "type": "hide",
+          "remove": true,
+          "time": 0,
+          "destruct": true
+        },
+        {
+          "type": "closeDoor",
+          "id": "yellowWall"
+        }
+      ]
+    },
+    "8,7": {
+      "trigger": null,
+      "enable": true,
+      "noPass": true,
+      "displayDamage": true,
+      "opacity": 1,
+      "filter": {
+        "blur": 0,
+        "hue": 0,
+        "grayscale": 0,
+        "invert": false,
+        "shadow": 0
+      },
+      "data": [
+        {
+          "type": "hide",
+          "remove": true,
+          "time": 0,
+          "destruct": true
+        },
+        {
+          "type": "closeDoor",
+          "id": "yellowWall"
+        }
+      ]
+    },
+    "9,7": {
+      "trigger": null,
+      "enable": true,
+      "noPass": true,
+      "displayDamage": true,
+      "opacity": 1,
+      "filter": {
+        "blur": 0,
+        "hue": 0,
+        "grayscale": 0,
+        "invert": false,
+        "shadow": 0
+      },
+      "data": [
+        {
+          "type": "hide",
+          "remove": true,
+          "time": 0,
+          "destruct": true
+        },
+        {
+          "type": "closeDoor",
+          "id": "yellowWall"
+        }
+      ]
+    },
+    "10,7": {
+      "trigger": null,
+      "enable": true,
+      "noPass": true,
+      "displayDamage": true,
+      "opacity": 1,
+      "filter": {
+        "blur": 0,
+        "hue": 0,
+        "grayscale": 0,
+        "invert": false,
+        "shadow": 0
+      },
+      "data": [
+        {
+          "type": "hide",
+          "remove": true,
+          "time": 0,
+          "destruct": true
+        },
+        {
+          "type": "closeDoor",
+          "id": "yellowWall"
+        }
+      ]
+    },
+    "7,8": {
+      "trigger": null,
+      "enable": true,
+      "noPass": true,
+      "displayDamage": true,
+      "opacity": 1,
+      "filter": {
+        "blur": 0,
+        "hue": 0,
+        "grayscale": 0,
+        "invert": false,
+        "shadow": 0
+      },
+      "data": [
+        {
+          "type": "hide",
+          "remove": true,
+          "time": 0,
+          "destruct": true
+        },
+        {
+          "type": "closeDoor",
+          "id": "yellowWall"
+        }
+      ]
+    },
+    "7,9": {
+      "trigger": null,
+      "enable": true,
+      "noPass": true,
+      "displayDamage": true,
+      "opacity": 1,
+      "filter": {
+        "blur": 0,
+        "hue": 0,
+        "grayscale": 0,
+        "invert": false,
+        "shadow": 0
+      },
+      "data": [
+        {
+          "type": "hide",
+          "remove": true,
+          "time": 0,
+          "destruct": true
+        },
+        {
+          "type": "closeDoor",
+          "id": "yellowWall"
+        }
+      ]
+    },
+    "8,9": {
+      "trigger": null,
+      "enable": true,
+      "noPass": true,
+      "displayDamage": true,
+      "opacity": 1,
+      "filter": {
+        "blur": 0,
+        "hue": 0,
+        "grayscale": 0,
+        "invert": false,
+        "shadow": 0
+      },
+      "data": [
+        {
+          "type": "hide",
+          "remove": true,
+          "time": 0,
+          "destruct": true
+        },
+        {
+          "type": "closeDoor",
+          "id": "yellowWall"
+        }
+      ]
+    },
+    "9,9": {
+      "trigger": null,
+      "enable": true,
+      "noPass": true,
+      "displayDamage": true,
+      "opacity": 1,
+      "filter": {
+        "blur": 0,
+        "hue": 0,
+        "grayscale": 0,
+        "invert": false,
+        "shadow": 0
+      },
+      "data": [
+        {
+          "type": "hide",
+          "remove": true,
+          "time": 0,
+          "destruct": true
+        },
+        {
+          "type": "closeDoor",
+          "id": "yellowWall"
+        }
+      ]
+    },
+    "7,10": {
+      "trigger": null,
+      "enable": true,
+      "noPass": true,
+      "displayDamage": true,
+      "opacity": 1,
+      "filter": {
+        "blur": 0,
+        "hue": 0,
+        "grayscale": 0,
+        "invert": false,
+        "shadow": 0
+      },
+      "data": [
+        {
+          "type": "hide",
+          "remove": true,
+          "time": 0,
+          "destruct": true
+        },
+        {
+          "type": "closeDoor",
+          "id": "yellowWall"
+        }
+      ]
+    },
+    "7,11": {
+      "trigger": null,
+      "enable": true,
+      "noPass": true,
+      "displayDamage": true,
+      "opacity": 1,
+      "filter": {
+        "blur": 0,
+        "hue": 0,
+        "grayscale": 0,
+        "invert": false,
+        "shadow": 0
+      },
+      "data": [
+        {
+          "type": "hide",
+          "remove": true,
+          "time": 0,
+          "destruct": true
+        },
+        {
+          "type": "closeDoor",
+          "id": "yellowWall"
+        }
+      ]
+    }
+  },
+  "firstArrive": [],
+  "eachArrive": [],
+  "afterGetItem": {},
+  "afterBattle": {},
+  "autoEvent": {},
+  "afterOpenDoor": {},
+  "cannotMove": {}
+}
