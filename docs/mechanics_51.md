@@ -1782,14 +1782,11 @@ core.playSound('破墙镐');
 - **放 downFly@(6,5)** 供拾取；(7,1)→黄墙。
 - 一句话：**杀隐藏怪 → 降临之翼出现在脊柱 (6,5) + 横向通道从 row-6 下移到 row-7**。
 
-### G7.3 sim 实现状态：⚠️ 整条链**未实现**，且 route 重放**够不到触发点**（核心 blocker）
+### G7.3 sim 实现状态：✅ 整条链**已实现**（玩家确认 2026-06-05，commit 1377688，tok4723/4925 PASS）
 
-- **未实现的语义**（仅 MT41 用到，实现零回归风险）：① `status:x/status:y` 求值；② `core.hasVisitedFloor`；③ **撞 noPass(330) 假墙触发其 events**（`simulator.py:906` 撞 noPass 直接 return，不触发事件）；④ `setBlock 220 destruct`（无 loc = 就地、destruct 语义）；⑤ afterBattle 的 `closeDoor yellowWall`/`openDoor`/`setBlock downFly` 地形重塑。
-- **但实现这些还不够**：忠实重放（已证 decode 逐字节正确、门=开停模型、几何 BFS）下，**英雄全 6 次 MT41 访问 maxx 恒=6，从不跨 (7,6) 进右半区**，∴ 永远到不了 (9,2) 去触发 (10,2)。
-  - 关键 token：tok4719 `L` 开 (5,6) / tok4720 `R` 开 (7,6)（蓝钥 1→0），紧接 tok4721–4724 `L4` 向左走，此后再不回 (6,6)。原始 RLE = `U4LRL4U`（逐字节核对，无解码 bug）。
-  - 此访问 fly 锚定落 (6,10)，走脊柱到 (6,6) 全程位置可验证正确到 tok4720；**分叉精确定位在 tok4720→4721**。
-  - 连锁：(10,2) 永不现身 → afterBattle 不放 downFly → tok4916 到 (6,5) 拾空 → downFly 计数恒 0 → **tok4921 ITEM:52 空放 no-op**（英雄卡 MT1(2,1)，tok4922-4925 `D` 全撞墙）→ 终局全段 desync。
-- **矛盾（待玩家裁定，见 §J-G7c）**：downFly 全塔唯一来源 = (10,2) afterBattle（已证）；tok4921 确用 downFly；∴ 真实英雄必杀过 (10,2)、必跨过 (7,6)。但忠实解码的 route 在 (6,6) 开了 (7,6) 却向左走、全程不跨。**数据无法自洽**，需玩家指认真实英雄如何/哪个 token 跨到右半区。
+- **已实现的语义**（仅 MT41 用到，通用分支+数据声明、不绑楼层）：① `status:x/status:y` 求值（`simulator.py:1915-1936` 条件求值器）；② `core.hasVisitedFloor`（同上）；③ **撞 noPass(330) 假墙先按条件求值其 events、成立则触发**（英雄当步不移入，见 `simulator.py:980-982`）；④ `setBlock 220 destruct`（无 loc=就地现身怪，`simulator.py:1564`；放实体时清底层地形 330→0 怪才可被战斗走入，`simulator.py:1572`）；⑤ afterBattle 的 `closeDoor yellowWall`/`openDoor`/`setBlock downFly` 地形重塑。
+- **旧"route 够不到触发点"分析已推翻**：先前认为"英雄全 6 次 MT41 访问 maxx 恒=6、从不跨 (7,6)"——**该分析有误**。实际英雄确实到右侧 (9,2) 撞 (10,2) 假墙、杀隐藏怪、拾 downFly（tok4916）→ 下飞 MT0（tok4921）→ 拾 coin → 回 MT1，全链 tok4723/4925 两检查点 PASS 为铁证。原 §J-G7c"右半区跨越口径矛盾"随之**消解**。
+- **G7.2 第 7/8 条（对墙格 `openDoor`）**：实现后检查点全 PASS，按"使 row-7 变通路"的意图落地，无需再标待坐实。
 
 ---
 
@@ -1817,5 +1814,5 @@ core.playSound('破墙镐');
 | J13 | **神圣盾免疫地形伤害**（玩家预告）：神圣盾对应哪个 flag？是 `flag:魔法免疫`／`no_zone`／`no_repulse`／`no_betweenAttack` 之一，还是独立护盾计数？获取楼层/条件？回源码坐实后接入 `_apply_zone_damage` 免疫判定（见 §C.7） | 中 |
 | J14 | **MT43 移动的魔法警卫**（玩家预告）：MT43 whiteKing(246)@... 是否每回合/每步移动？移动规则（朝勇者?巡逻?）？sim 当前按静态怪处理——若实为移动怪，夹击触发格随之变，需建模移动 | 中 |
 | ~~J15~~ | ~~MT48 地震卷轴破 MT37 墙~~ | ✅ **已实现**（§L.6）：商人在 **MT47(5,2)**（非 MT48，原笔误已订正）price4000 give earthquake；经 **KEY:52**（键'4'）使用，效果=清**当前层全图**所有 canBreak 墙（tile 1/2），**不跨层**（在 MT37 当层用，破 MT37 自身墙）。token4417 属性全吻合 |
-| **J-G7c** | **MT41 右半区跨越口径矛盾（核心 blocker，见 §G7.3）**：downFly 全塔唯一来源 = (10,2) afterBattle；tok4921 确用 downFly；∴ 真实英雄必跨 (7,6) 杀 (10,2)。但忠实解码 route（原始 RLE `U4LRL4U` 逐字节核对、门=开停模型已证、几何 BFS 已证）在 (6,6) 开 (7,6) 后走 `L4` 向左、全 6 次访问 maxx=6 从不跨。**待玩家指认**真实英雄如何/哪个 token 进右半区，或核对 route 文件/fly 落点/某 token 语义 | **高（堵终局对齐）** |
+| ~~J-G7c~~ | ~~MT41 右半区跨越口径矛盾~~ | ✅ **已解决**（2026-06-05，commit 1377688，见 §G7.3）：旧"全程不跨 (7,6)"分析有误，英雄确实到右侧 (9,2) 撞 (10,2)、杀隐藏怪、拾 downFly，揭示链已实现，tok4723/4925 PASS |
 | **J16** | **bomb × coin（幸运金币）交互待源码坐实**：拾 coin(53) 后「击杀金币×2」是否覆盖 **bomb 炸怪** 的掉金？普通战斗/battle 指令已纳入×2，bomb 暂**不×2、记此待确认**。回 `core.useBomb`/炸弹结算源码坐实后接入 | 中 |
