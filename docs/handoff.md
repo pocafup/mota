@@ -5,6 +5,18 @@
 
 ---
 
+## 🟢 实现 earthquake/bomb/pickaxe/upFly-downFly + KEY 派发表 + MT44 隐藏层单向楼梯：token4417/4504/4528/4582 转绿，32/32 检查点全 PASS，对齐至 token4582(MT47)（2026-06-04，commit 1e84590）
+
+- **进展**：**32/32 检查点全 PASS**，**模拟器逐 token 对齐至 token4582**，**全塔 50 层数据齐备**，**全部道具（snow / centerFly / earthquake / bomb / pickaxe / 飞翼 upFly-downFly）已实现**。本段把 KEY 快捷键体系坐实并补齐最后几个道具，消掉 token4417/4504/4528/4582 四个 FAIL：
+  1. **KEY 派发表坐实（引擎硬编码 `onKeyUp`，非存档配置）**：49→pickaxe（破墙镐，无备选）、50→bomb（否则 hammer）、51→centerFly（瞬移面板）、52→[icePickaxe,freezeBadge,earthquake,upFly,downFly,…] 首个可用。50/52 两行与玩家实测（bomb/earthquake）吻合 → 表权威 → 49=pickaxe 一并坐实。绑定落 `data/games51/replay_keybindings.json`（`{"52":"earthquake","50":"bomb","49":"pickaxe"}`），sim 按表派发不硬编码。`decode_route.py` 补 `K<keyCode>`（无冒号）→ `KEY:<keycode>` 解析。
+  2. **earthquake / bomb / pickaxe / upFly / downFly 五道具实现**：earthquake（§L.6，键'4'，清当前层全图 canBreak 墙 tile1/2，**这是 token4417 根因**——破 MT37 内墙后拾齐 11黄2蓝1红/ATK+16/DEF+16）；**bomb**（§I.7，键'2'，炸英雄四方向相邻 hp<500 的怪，**走 afterBattle 路径**与战斗死亡同——MT44(6,9) 一发炸 (5,9)(7,9) 两 redGuard→openDoor(6,8)→上取 redPotion×?/shield5，**这是 token4528 根因**）；**pickaxe**（§L.5，键'1'，破四方向相邻 canBreak 墙，earthquake 的相邻版）；**upFly/downFly**（§I.7，飞翼，唯一进入 MT44 隐藏层的手段）。
+  3. **MT44 隐藏层单向楼梯**：`isHide:true` → `canFlyTo=false / canFlyFrom=true`，MT43↔MT45 楼梯直连跳过 MT44，MT44 楼梯只能**出**不能**进**，唯一入口 = upFly/downFly。修 `_copy_state` 漏传 `is_hide`（每步被重置 False）的根因 bug。
+  4. **真值订正两处**（玩家主动裁定，非凑绿）：token4417 (2,4)→(2,3)、**token4582 层 MT44→MT47**（route 末两跳 FLOOR 显式飞 MT47 + 坐标/HP/属性/钥匙全吻合为证）。
+- **剩余**：**终局段 token4582→6360（约 1800 token）无真值覆盖**。已知路上有：**tok5131 踩章鱼区**、**tok5315–5326 八个 help 键（no-op）**、**tok5391 KEY:49 用 pickaxe**、**tok6354 第三次 centerFly**、**MT26 公主设 flag**、**MT24 传送 MT50**、**MT49 竞技场（/10 魔王）**、**MT50 终局 boss（杀死即 win = 重放终止）**。**N-b（真假结局口径）按假结局对齐**。
+- **下一步**：玩家提供终局段真值，对齐到通关。
+
+---
+
 ## 🟢 扩层最后一批 MT42–MT50 + 四种地形伤 + MT44 隐藏层跳层 + MT31 商人：token4222/4350 转绿，28/32 检查点 PASS（2026-06-04，commit 7696385）
 
 - **进展**：**28/32 检查点 PASS**，**MT1–MT47 段逐 token 推进中**，**全塔 50 层数据已提取完毕（各 0 处不一致）**。本段把最后九层（MT42–MT50）落盘并实现四类地形伤 + 两个跨层/商人机制，消掉 token4222/4350 两个 FAIL：
@@ -23,7 +35,7 @@
   - **玩家预告该段含三项已登记待确认**（铁律：不自行猜根因/改真值/改断言凑绿，待源码坐实）：
     - **J13 神圣盾免疫地形伤**（`docs/mechanics_51.md` §J）：神圣盾对应哪个 flag、获取楼层/条件待坐实；当前未实现免疫。
     - **J14 MT43 移动的魔法警卫**：whiteKing 是否每步/每回合移动、移动规则待坐实；sim 当前按静态怪处理，若实为移动怪则夹击触发格随之变。
-    - **J15 MT48 地震卷轴破 MT37 墙**：MT48 商人(5,2 price4000 give earthquake)买的地震卷轴使用效果（炸哪些墙/坐标/是否跨层）待坐实；当前 ITEM:earthquake 为 no-op。**tok4396 起 MT37↔MT38 横跳大概率与此相关**（earthquake 破墙后 MT37 连通性变化）。
+    - ~~**J15 MT48 地震卷轴破 MT37 墙**~~ → ✅ **已解决（2026-06-04）**：商人在 **MT47(5,2)**（**非 MT48**，原笔误已订正 handoff/mechanics，shops.json 本就对）。tok4369 `KEY:52`（键'4'）= 使用 earthquake（玩家实测坐实，推翻旧推测"K52=upFly"），效果 = 清**当前层全图**所有 canBreak 墙（tile 1/2），不跨层。实现见 §L.6 + `_use_earthquake`。**这正是 token4417 根因**：破墙后 MT37 内部连通，tok4370–4417 拾齐 11黄2蓝1红/ATK+16/DEF+16，**token4417 属性全吻合**（旧"MT37↔MT38 横跳"消失，改为正常遍历内部）。残留仅终点坐标 sim(2,3) vs 真值(2,4) 差一步，待裁定（见下）。
 - **剩余检查点（3 个，4417 之后）**：token **4504 / 4528 / 4582**，集中在 **DEF 暴涨段 134→204→309**（疑 shield5 / 大盾拾取）：
   ```
   token4504: MT43 (9,4)   HP=123  ATK=202 DEF=204  黄=5 蓝=2
