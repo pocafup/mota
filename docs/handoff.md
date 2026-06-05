@@ -5,7 +5,35 @@
 
 ---
 
-## 🟢 提取 MT0 地下室 + 幸运金币×2 / bigKey 全开黄门 / 撞假墙 reveal 链（G7 解决）/ 圣水：token4723/4925 转绿，35/36 检查点 PASS（2026-06-05，待提交）
+## 🟢🎉 模拟器阶段完成：MT2 商人 3% 祝福 + MT49 削弱链/屠龙刀 + 圣水 switch 分支 + win 软终止——46/46 检查点全 PASS，token0→6353 通关全程逐 token 复现，终态 won=True HP=14382（2026-06-05，commit d026c80）
+
+### 【里程碑：模拟器阶段完成】
+
+- **忠实复现真实通关全程**：**6354 token（索引 0→6353）、51 层（MT0–MT50）、全部机制**，**46 检查点 + 68 单测全绿**。终态 **won=True、HP=14382**——这是**本 route 的成绩基准**，即 solver 要超越的数字。
+- **双终止态**（solver 的失败/成功判定接口，二者置位后 `step()` 一切 token 冻结 no-op）：
+  - `dead`（**死亡硬终止**）：HP≤0 即 game over，冻结于死亡点。
+  - `won`（**通关软终止**）：杀 MT50(6,5) 魔王 → `afterBattle["6,5"]` 榜单 while 经 break 跳出 → 续跑循环外 `type:win` → won=True。此刻 `hero.hp` = 最优化目标值。
+- **本段消掉最后 FAIL 的根因**（铁律：玩家裁定，非凑绿）：
+  1. **圣水 tok6340 no-op（switch 分支）**：`_eval_single` 缺 `switch:` 读分支 → MT16 老人二段事件 `if switch:A` 恒 false → 永不进发圣水的 choices 支 → superPotion 未入包。补分支后 tok6340 HP **+6510**（=round(0.74×(507+373))×10）。
+  2. **win 永不触发（break 吞 while 后指令）**：`afterBattle["6,5"]` = `[…, while{榜单choices}, type:win]`，tok6353=CHOICE:0 选"生命值"含 break 跳出 while。旧 CHOICE 恢复码把 break 当"丢弃整个 remaining"，连 type:win 一起吞掉 → won 永不置位。修复：break 时若 remaining 以 `_while_continue` 哨兵打头则只丢该哨兵、清 break、续跑循环【外】指令（商店 while 后无指令，对其 no-op）。
+  3. **MT2 商人 3% 祝福（Math.round）**：`_eval_value_expr` 未翻译 JS `Math.round/floor/ceil` → eval 异常返回 0（祝福 +0）。补 Math.* → `_mround/_mfloor/_mceil`。tok6222 ATK 492→507、DEF 362→373。
+  4. **锚点订正 tok6221→tok6222**（玩家 2026-06-05 主动裁定）：玩家记锚点时读的是接受祝福【后】属性 507/373；游戏内撞击/选择不直接反映在 token 记录，实际对应 sim CHOICE 生效那步。
+- **MT50 魔王战算账**（终态 HP 来源）：setEnemy redKing hp5000/atk1580/def190；勇者 ATK507 vs 防190 → 每刀 317、⌈5000/317⌉=16 刀；受 boss ATK1580 vs 防373=1207/刀×(16−1)=**18105** → 32487−18105=**14382**。boss 金 500×幸运币 2 → +1000。
+
+### 【下一阶段：求解器】
+
+solver 设计见 `docs/solver-design.md`。已积累的 solver 相关资产：
+
+- **自动模式 floodfill**（`_auto_floodfill`）= 天然**状态化简器**：可达零伤非事件怪自动秒杀 + 可达道具自动拾取，迭代到不动点（门挡=不可达，不穿门）。
+- **死亡硬终止**（dead）= **剪枝**接口：探索"会死路线"时即时砍掉（普通战斗 damage≥hp 由 canBattle 拦截、永不致死；能致死的只有 force/事件/地形）。
+- **centerFly 绕后清场** = MT40 零伤打法范式（瞬移锚点先清红门上 13 格再踩触发格，全程零损）。
+- **被动加成**（非线性属性阈值来源之一）：coin（金币×2）、knife 屠龙刀（对 magicDragon ATK×2）、cross（对僵尸/吸血鬼 ATK×2）。
+- **⚠ bomb×coin 交互待源码坐实**：bomb 炸杀金币当前**不**乘 coin×2（走 removeBlock 非 `_enemy_gold`），引擎 afterBattle 源码未抓取——**solver 启动前必须确认**（mechanics §J）。
+- **N-b（真结局口径）不在求解范围**：按假结局(NE)对齐，通关 = 杀 MT50 boss 即终止。
+
+---
+
+## 🟢 提取 MT0 地下室 + 幸运金币×2 / bigKey 全开黄门 / 撞假墙 reveal 链（G7 解决）/ 圣水：token4723/4925 转绿，35/36 检查点 PASS（2026-06-05，commit 1377688）
 
 - **进展**：**35/36 PASS**，**对齐至 token4925**（MT0 已通、coin 幸运金币已拾、reveal 链 / G7 已解决），**全部道具机制实现完毕**。本段消掉 tok4723/4925 两个 FAIL：
   1. **MT0 地下室落盘**：`data/games51/floors/MT0.json`（玩家 2026-06-04 引擎抓取）。地下室全空：(1,1)=87 上楼→MT1、(6,6)=53 coin，`events / afterBattle / firstArrive / autoEvent` 全空 = **无自定义事件需建模**；仅 downFly（从 MT1）可进、(1,1) 楼梯回 MT1。
