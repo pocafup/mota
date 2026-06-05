@@ -74,6 +74,9 @@ def _has(special: List[int], n: int) -> bool:
 
 
 _CROSS_ENEMIES = {"zombie", "zombieKnight", "vampire"}
+# 屠龙匕首(knife) 攻击翻倍目标。来源 data/games51/items.json knife._passive（被动：对 magicDragon ATK×2）；
+# magicDragon id 来自 tiles.json enemys[257]。见 docs/mechanics_51.md §A.4。
+_KNIFE_ENEMIES = {"magicDragon"}
 
 
 def compute_combat(
@@ -82,6 +85,7 @@ def compute_combat(
     extra_turn: int = 0,
     hatred: int = 0,
     has_cross: bool = False,
+    has_knife: bool = False,
 ) -> CombatResult:
     """
     Pure implementation of getEnemyInfo + getDamageInfo + post-combat effects.
@@ -94,6 +98,7 @@ def compute_combat(
     extra_turn : value of flag __extraTurn__ (guard system; 0 in normal combat)
     hatred     : value of flag hatred (accumulated from prior kills; for special 17)
     has_cross  : hero holds cross item (doubles ATK vs zombie/zombieKnight/vampire)
+    has_knife  : hero holds knife item (doubles ATK vs magicDragon; 见 mechanics §A.4)
     """
     sp = enemy.special
 
@@ -101,6 +106,12 @@ def compute_combat(
     # Source: getDamageInfo → hasItem("cross") && [...].indexOf(enemy.id) >= 0 → hero_atk *= 2
     hero_atk = hero.atk
     if has_cross and enemy.id in _CROSS_ENEMIES:
+        hero_atk *= 2
+
+    # ── knife(屠龙匕首): double ATK against magicDragon ───────────────────────
+    # Source: data/games51/items.json knife._passive。本 route 魔龙战(MT35)在取刀(MT49)之前，
+    # 故对本回放无影响；实现保证 solver 取刀后的魔龙战正确。见 mechanics §A.4
+    if has_knife and enemy.id in _KNIFE_ENEMIES:
         hero_atk *= 2
 
     # ── getEnemyInfo: 模仿(10) and 坚固(3) ──────────────────────────────────

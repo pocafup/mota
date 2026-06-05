@@ -11,7 +11,9 @@ step(state, action) -> new_state (pure function, no side effects).
 from __future__ import annotations
 
 import json
+import math
 import re
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -88,6 +90,9 @@ class FloorState:
     # 隐藏层标记（来自 JSON isHide）：楼梯 :next/:before 解析对隐藏层透明（跳过），
     # 隐藏层只能用 upFly/downFly 进入。本塔仅 MT44。见 mechanics §I.5。
     is_hide: bool = False
+    # beforeBattle（来自 JSON）：战斗前事件 dict，键为 "x,y"。本塔全空（仅 MT0 有空键）。
+    # 自动模式排除口径之一：挂 beforeBattle 的怪不自动秒杀（与 events/afterBattle 同列）。
+    before_battle: dict = field(default_factory=dict)
     # firstArrive / afterGetItem（来自 JSON）
     first_arrive: list = field(default_factory=list)
     after_get_item: dict = field(default_factory=dict)
@@ -132,6 +137,7 @@ class GameState:
     pending_floor_change: dict | None  # {"floor_id", "x", "y"} set by changeFloor event
     _floors_dir: Path      # base directory for lazy floor loading
     dead: bool = False     # 勇者死亡(HP≤0)硬终止：置位后 step() 对一切 token no-op。见 mechanics §M.8
+    won: bool = False      # 通关(type:win)软终止：杀 MT50(6,5)魔王→afterBattle type:win 置位。见 §N.3
     _common_events: dict = field(default_factory=dict)
     _merchants: dict = field(default_factory=dict)  # 商人目录缓存 {floorId@x@y: {price, give}}
     # setEnemy 临时改怪：{monster_id: {attr: value}}。special 存为 list（见 mechanics §M.1/M.4）
@@ -139,6 +145,9 @@ class GameState:
     # 存档键盘快捷键绑定 {keyCode_int: item_id}（数据驱动，来自 data/<塔>/replay_keybindings.json）。
     # KEY:<keyCode> token 按此表派发为使用对应道具；无绑定则 no-op。绝不在 sim 硬编码键→道具。
     _key_bindings: dict = field(default_factory=dict)
+    # 自动模式开关（help token 开启，见 §自动模式）：开启后每次同层移动结算后跑 floodfill，
+    # 自动秒杀可达零伤非事件怪 + 自动拾取可达道具，迭代到不动点。tok5315 起 True，本 route 不复位。
+    auto_mode: bool = False
 
     @property
     def floor(self) -> FloorState:
@@ -164,6 +173,7 @@ def _copy_state(state: GameState) -> GameState:
             ratio=f.ratio,
             events=f.events,
             after_battle=f.after_battle,
+            before_battle=f.before_battle,
             after_open_door=f.after_open_door,
             auto_event=f.auto_event,
             change_floor=f.change_floor,
@@ -207,6 +217,8 @@ def _copy_state(state: GameState) -> GameState:
         _enemy_overrides={k: dict(v) for k, v in state._enemy_overrides.items()},
         _key_bindings=state._key_bindings,
         dead=state.dead,
+        won=state.won,
+        auto_mode=state.auto_mode,
     )
 
 
@@ -306,6 +318,7 @@ def load_floor(path: Path) -> FloorState:
         ratio=data.get("ratio", 1),
         events=data.get("events", {}),
         after_battle=data.get("afterBattle", {}),
+        before_battle=data.get("beforeBattle", {}),
         after_open_door=data.get("afterOpenDoor", {}),
         auto_event=data.get("autoEvent", {}),
         change_floor=data.get("changeFloor", {}),
@@ -663,9 +676,12 @@ def step(state: GameState, action: str) -> GameState:
     死亡硬终止（引擎机制，见 mechanics §M.8）：勇者 HP≤0 即 game over，
     之后一切 token 全部 no-op（不战斗/拾取/切层/触发事件），状态冻结在死亡点。
     任何绕过 canBattle 拦截的死亡来源（强制战斗 §M、地形伤、poison、事件扣血）
-    都在此统一兜底——本 step 结束后若 HP≤0 即置 dead。"""
-    if state.dead:
-        return state  # 已死：冻结，原样返回（无副作用，等效 no-op）
+    都在此统一兜底——本 step 结束后若 HP≤0 即置 dead。
+
+    通关软终止（与死亡对偶，见 §N.3）：杀 MT50(6,5)魔王→afterBattle type:win
+    置 won=True，之后一切 token 同样冻结。此刻 hero.hp 即最优化目标(剩余 HP 最大化)。"""
+    if state.dead or state.won:
+        return state  # 已死/已通关：冻结，原样返回（无副作用，等效 no-op）
     new_state = _step_impl(state, action)
     if new_state.hero.hp <= 0:
         new_state.dead = True
@@ -674,6 +690,13 @@ def step(state: GameState, action: str) -> GameState:
 
 def _step_impl(state: GameState, action: str) -> GameState:
     state = _copy_state(state)
+
+    # 自动模式开关：help token = 引擎插入"游戏说明"菜单(作者 MT1 自述自动操作挂此菜单)。
+    # 对状态无其它副作用（已验证 help 区段 tok5314→5328 状态全冻结），仅置 auto_mode=True。
+    # 置位后每次同层移动结算后跑 _auto_floodfill。本 route 两处 help(tok5315/6354)，置位幂等。
+    if action == "help":
+        state.auto_mode = True
+        return state
 
     # fly魔杖切层（FLOOR:MTn token）
     if action.startswith("FLOOR:"):
@@ -690,6 +713,9 @@ def _step_impl(state: GameState, action: str) -> GameState:
             state.hero.hp -= ignore_steps * 10  # poisonDamage = 10
         state.hero.x = nx
         state.hero.y = ny
+        # moveDirectly 是同层移动 → 自动模式同样在落点后跑 floodfill
+        if state.auto_mode:
+            _auto_floodfill(state)
         return state
 
     # 道具使用（ITEM:n，n=道具 tile）。按道具 id 派发；未建模道具暂为 no-op。
@@ -728,6 +754,15 @@ def _step_impl(state: GameState, action: str) -> GameState:
             # 若是 choices 型事件，执行选中分支的 action 列表
             if choices and 0 <= n < len(choices):
                 _execute_event_list(state, choices[n].get("action", []), ex, ey)
+            # break n:1（商店/榜单"离开"分支）跳出 1 层 while：若 remaining 以 _while_continue
+            # 哨兵(=被跳出循环的再入点)打头，丢弃该哨兵并清 break，续跑循环【外】指令。
+            # 否则旧码把 break 当"丢弃整个 remaining"，会吞掉 afterBattle["6,5"] 榜单 while
+            # 之后紧跟的 type:win → won 永不置位。商店 while 后无指令，此处对其为 no-op。见 §N.3。
+            if (state.floor._event_break and remaining
+                    and isinstance(remaining[0], dict)
+                    and remaining[0].get("type") == "_while_continue"):
+                state.floor._event_break = False
+                remaining = remaining[1:]
             # 执行后续主流程剩余指令（无再次拦截、无 break 时）
             if (not state.floor._event_intercepting
                     and remaining
@@ -737,7 +772,9 @@ def _step_impl(state: GameState, action: str) -> GameState:
         _check_auto_events(state)
         return state
 
+    moved_from = None
     if action in ("U", "D", "L", "R"):
+        moved_from = (state.current_floor, state.hero.x, state.hero.y)
         _process_move(state, action)
 
     # 优先处理事件 changeFloor 设置的切层
@@ -755,6 +792,15 @@ def _step_impl(state: GameState, action: str) -> GameState:
         return state
 
     _check_auto_events(state)
+
+    # 自动模式 floodfill：仅当本次为【同层移动且英雄位置确实改变】才触发。
+    # 开门/撞墙/无法进入 → 位置不变 → 不触发（满足"开门不算"）。
+    # 切层(pending/楼梯)已在上面 return；auto_event 若切层则 current_floor 变 → 守卫排除。
+    if (state.auto_mode and moved_from is not None
+            and moved_from[0] == state.current_floor
+            and (moved_from[1], moved_from[2]) != (state.hero.x, state.hero.y)):
+        _auto_floodfill(state)
+
     return state
 
 
@@ -1107,7 +1153,8 @@ def _fight_monster(state: GameState, mx: int, my: int) -> None:
     monster = _build_monster(state, monster_id)
     hero_ps = PlayerState(hp=hero.hp, atk=hero.atk, def_=hero.def_, mdef=hero.mdef)
     has_cross = hero.items.get("cross", 0) > 0
-    result = compute_combat(hero_ps, monster, has_cross=has_cross)
+    has_knife = hero.items.get("knife", 0) > 0
+    result = compute_combat(hero_ps, monster, has_cross=has_cross, has_knife=has_knife)
 
     if result.damage is None:
         return
@@ -1148,7 +1195,8 @@ def _forced_battle(state: GameState, enemy_id: str) -> None:
     monster = _build_monster(state, enemy_id)
     hero_ps = PlayerState(hp=hero.hp, atk=hero.atk, def_=hero.def_, mdef=hero.mdef)
     has_cross = hero.items.get("cross", 0) > 0
-    result = compute_combat(hero_ps, monster, has_cross=has_cross)
+    has_knife = hero.items.get("knife", 0) > 0
+    result = compute_combat(hero_ps, monster, has_cross=has_cross, has_knife=has_knife)
     if result.damage is None:
         return  # 打不动(hero_per==0)：route 不会到此
     hero.hp -= result.damage          # force：不拦截，直接扣血（可致 hp<=0 = 死亡）
@@ -1205,6 +1253,108 @@ def _apply_item_effect(hero: HeroState, effect: dict, ratio: int) -> None:
             hero.keys[item] = hero.keys.get(item, 0) + count
         else:
             hero.items[item] = hero.items.get(item, 0) + count
+
+
+# ─── 自动模式 floodfill（玩家裁定金标准语义；help token 开启）──────────────────
+# 开启后(tok5315 help 起)，每次【当前层的移动】(开门/撞墙不算)结算后，自动跑一轮 floodfill：
+#   1. 自动秒杀所有【可达 + 零伤 + 非事件】怪物（零伤=对当前英雄 damage==0；
+#      挂 events/afterBattle/beforeBattle 任一的怪排除，如 MT49 全部怪靠 afterBattle 排除）。
+#   2. 自动拾取所有【可达】道具/血瓶（含清掉挡路零伤怪后才可达的）。
+#   3. 门挡住=不可达，floodfill 不穿任何门（墙/noPass/钥匙门/特殊门/隐藏墙/大怪footprint 均阻挡）。
+#   4. 战利品照常结算：金币(coin×2 照乘)、击杀数、战后效果。
+# vacuum 模型：英雄逻辑坐标不变（锚点真值显示英雄停在显式移动落点），不结算区域伤、不触发本格
+# events/afterBattle（被吸收的怪本就无事件）。迭代到不动点：拾取属性道具→更多怪变零伤；清挡路怪→
+# 更多道具可达。边界（区域伤/战后特殊/afterGetItem 副作用）第一版从简，差异由首个 FAIL 窗口玩家裁定。
+
+def _auto_combat_result(state: GameState, mx: int, my: int):
+    """判定 (mx,my) 的怪是否可被自动秒杀。可则返回 (monster_id, combat_result)，否则 None。
+    口径：该格为怪 + loc 不在 events/afterBattle/beforeBattle + 对当前英雄 damage==0。"""
+    floor = state.floor
+    monster_id = floor._tile_to_enemy.get(floor.entities[my][mx])
+    if monster_id is None:
+        return None
+    loc_key = f"{mx},{my}"
+    if (loc_key in floor.events or loc_key in floor.after_battle
+            or loc_key in floor.before_battle):
+        return None   # 挂任一事件的怪不自动打
+    hero = state.hero
+    monster = _build_monster(state, monster_id)
+    hero_ps = PlayerState(hp=hero.hp, atk=hero.atk, def_=hero.def_, mdef=hero.mdef)
+    has_cross = hero.items.get("cross", 0) > 0
+    has_knife = hero.items.get("knife", 0) > 0
+    result = compute_combat(hero_ps, monster, has_cross=has_cross, has_knife=has_knife)
+    if result.damage != 0:   # None(打不动) 或 >0(非零伤) → 不自动打
+        return None
+    return monster_id, result
+
+
+def _auto_kill_monster(state: GameState, mx: int, my: int, monster_id: str, result) -> None:
+    """floodfill 自动秒杀结算(vacuum)：扣血(零伤=0)/金币(coin×2)/击杀数/战后效果，清除怪实体。
+    【不】移动英雄、【不】结算区域伤、【不】触发本格 events/afterBattle（怪已排除事件，本无事件）。"""
+    hero = state.hero
+    floor = state.floor
+    hero.hp -= result.damage   # 零伤为 0
+    hero.gold += _enemy_gold(hero, floor._monsters_db[monster_id].get("gold", 0))
+    hero.kill_count += 1
+    floor.entities[my][mx] = 0
+    _apply_post_combat_effects(hero, result)
+
+
+def _auto_floodfill(state: GameState) -> None:
+    """自动模式主入口：反复跑单趟 BFS 吸收，直到一趟无任何吸收（不动点）。"""
+    while _auto_floodfill_pass(state):
+        pass
+
+
+def _auto_floodfill_pass(state: GameState) -> bool:
+    """单趟 BFS：从英雄格扩散，吸收沿途可达的零伤非事件怪与道具。返回本趟是否发生过吸收。"""
+    floor = state.floor
+    hero = state.hero
+    rows = len(floor.terrain)
+    cols = len(floor.terrain[0]) if rows else 0
+    if not (0 <= hero.y < rows and 0 <= hero.x < cols):
+        return False
+    visited = [[False] * cols for _ in range(rows)]
+    visited[hero.y][hero.x] = True
+    dq = deque([(hero.x, hero.y)])
+    consumed = False
+    while dq:
+        cx, cy = dq.popleft()
+        for dx, dy in ((0, -1), (0, 1), (-1, 0), (1, 0)):
+            nx, ny = cx + dx, cy + dy
+            if not (0 <= ny < rows and 0 <= nx < cols) or visited[ny][nx]:
+                continue
+            t = floor.terrain[ny][nx]
+            # 地形阻挡：墙/noPass/特殊门/钥匙门/隐藏墙(fakeWall) → 门挡住=不可达，不穿门
+            if (t in WALL_TILES or t in floor._no_pass_tiles or t == SPECIAL_DOOR
+                    or t in DOOR_KEY_MAP or t in AUTO_OPEN_TILES):
+                continue
+            # 大型怪 footprint 覆盖格 → 阻挡
+            if _in_alive_monster_footprint(floor, nx, ny):
+                continue
+            e = floor.entities[ny][nx]
+            if e:
+                if e in floor._tile_to_enemy:
+                    res = _auto_combat_result(state, nx, ny)
+                    if res is not None:
+                        _auto_kill_monster(state, nx, ny, res[0], res[1])
+                        consumed = True
+                        visited[ny][nx] = True
+                        dq.append((nx, ny))   # 吸收后变空地，继续穿过
+                    # 否则：挡路怪(非零伤/挂事件) → 阻挡，不进入
+                    continue
+                if e in floor._tile_to_item:
+                    _pickup_item(state, nx, ny)
+                    consumed = True
+                    visited[ny][nx] = True
+                    dq.append((nx, ny))
+                    continue
+                # 其它实体(NPC/商人/老人/大怪本体等) → 阻挡
+                continue
+            # 空地 → 可通行
+            visited[ny][nx] = True
+            dq.append((nx, ny))
+    return consumed
 
 
 # ─── Event firing ────────────────────────────────────────────────────────────
@@ -1325,10 +1475,17 @@ def _execute_instruction(
     floor = state.floor
     t = instr.get("type", "")
 
+    # ── win：通关软终止（与死亡硬终止对偶，solver 成功终点）。见 §N.3 ────────────
+    # 杀 MT50(6,5)魔王 → afterBattle 抵达 type:win。置 won=True；step() 后冻结（同 dead）。
+    # 此刻 hero.hp = 最优化目标值（剩余 HP 最大化）。
+    if t == "win":
+        state.won = True
+        return
+
     # ── no-ops ────────────────────────────────────────────────────────────────
     if t in (
         "waitAsync", "sleep", "playBgm", "playSound", "setBgFgBlock",
-        "setCurtain", "tip", "for", "function", "win", "vibrate",
+        "setCurtain", "tip", "for", "function", "vibrate",
         "setFg", "setBg", "flashBack", "fadeOut", "fadeIn", "scroll",
         "showStatusBar", "setStatusBar", "achievementGet",
     ):
@@ -1423,6 +1580,7 @@ def _execute_instruction(
         eid = instr.get("id")
         name = instr.get("name", "")
         value = instr.get("value")
+        operator = instr.get("operator", "=")   # 复合赋值：= / += / -= / *= / /=（默认直接赋值）
         if eid:
             ov = state._enemy_overrides.setdefault(eid, {})
             if name == "special":
@@ -1430,9 +1588,26 @@ def _execute_instruction(
                 ov["special"] = [iv] if iv else []   # value 0 → 清空特技（解除先攻）
             else:
                 try:
-                    ov[name] = int(value)
+                    v = int(value)
                 except (ValueError, TypeError):
-                    ov[name] = value
+                    ov[name] = value   # 非数值：仅支持直接赋值
+                    return
+                if operator == "=":
+                    ov[name] = v
+                else:
+                    # 复合赋值按【当前有效值】运算（含此前 override），口径同 _build_monster。
+                    # MT49 削弱：redKing hp/atk/def 各 /=10（8000/5000/1000→800/500/100）。见 mechanics §N.2
+                    cur = ov.get(name, state.floor._monsters_db.get(eid, {}).get(name, 0))
+                    if operator == "+=":
+                        ov[name] = cur + v
+                    elif operator == "-=":
+                        ov[name] = cur - v
+                    elif operator == "*=":
+                        ov[name] = cur * v
+                    elif operator == "/=":
+                        ov[name] = cur // v   # 整数除法（属性为整数；本塔削弱值均可整除）
+                    else:
+                        ov[name] = v   # 未知运算符兜底直接赋值
         return
 
     # ── battle（剧情强制战斗，绕过 canBattle 拦截）─────────────────────────────
@@ -1660,15 +1835,27 @@ def _eval_single(part: str, state: GameState) -> bool:
     if part.startswith("flag:"):
         return bool(hero.flags.get(part[5:], False))
 
+    # switch:X 裸真值判定。_set_value 把 switch:X 存于 hero.flags["switch:X"]（带前缀，line ~1976），
+    # 故此处按整串 part 取键。缺此分支时 switch:A 恒 False → MT16/MT12 老人二段事件
+    # （首撞 set switch:A=true，再撞读 switch:A 进 choices）永远到不了发圣水的 choices 支
+    # → superPotion 未入包 → tok6340 圣水 no-op。全塔仅 switch:A，且无 flag:A 冲突。
+    if part.startswith("switch:"):
+        return bool(hero.flags.get(part, False))
+
     m = re.match(r"\(?blockId:(\d+),(\d+)\s*===\s*'(\w+)'\)?", part)
     if m:
         bx, by, bid = int(m.group(1)), int(m.group(2)), m.group(3)
         return floor._tile_to_entity.get(floor.entities[by][bx]) == bid
 
-    m = re.match(r"core\.getBlockId\((\d+),\s*(\d+)\)\s*===\s*null", part)
+    # core.getBlockId(x,y) ===/!== null | 'id'：该格实体 id 比较（getBlockId 语义）。
+    # === null 旧行为完全保留：_tile_to_entity.get(0/非实体)=None，None==None→True（等价旧 `not in`）。
+    # 新增带 id 比较（=== 'whiteKing' 等）——MT49 竞技场削弱 autoEvent 的 8 子句。见 mechanics §N.2
+    m = re.match(r"core\.getBlockId\((\d+),\s*(\d+)\)\s*(===|!==)\s*(null|'(\w+)')", part)
     if m:
-        bx, by = int(m.group(1)), int(m.group(2))
-        return floor.entities[by][bx] not in floor._tile_to_entity
+        bx, by, op = int(m.group(1)), int(m.group(2)), m.group(3)
+        rhs = None if m.group(4) == "null" else m.group(5)
+        actual = floor._tile_to_entity.get(floor.entities[by][bx])  # 空/非实体 → None
+        return (actual == rhs) if op == "===" else (actual != rhs)
 
     # core.getBlock(x,y) ===/!== null：该格是否有 block（裸 getBlock，区别于 getBlockId）。
     # h5mota 口径（§I.6 调用链）：blockObjs 收录所有 tile≠0 的格（墙/门/楼梯/地形/装饰/
@@ -1712,7 +1899,8 @@ def _eval_single(part: str, state: GameState) -> bool:
         monster = _build_monster(state, eid)
         hero_ps = PlayerState(hp=hero.hp, atk=hero.atk, def_=hero.def_, mdef=hero.mdef)
         has_cross = hero.items.get("cross", 0) > 0
-        result = compute_combat(hero_ps, monster, has_cross=has_cross)
+        has_knife = hero.items.get("knife", 0) > 0
+        result = compute_combat(hero_ps, monster, has_cross=has_cross, has_knife=has_knife)
         return result.damage is not None and result.damage < hero.hp
 
     # core.searchBlock('id','floor').length OP n：MT29 小偷暗道支线条件。见 mechanics §M.6
@@ -1768,8 +1956,15 @@ def _eval_value_expr(expr: str, state: GameState) -> int:
         return str(mapping.get(key, 0))
 
     s = re.sub(r'(flag|status):(\w+)', _replace, str(expr))
+    # JS Math.* → Python（取整口径同 _use_super_potion：Math.round = floor(x+0.5)）。
+    # 不翻译会让 eval 遇到未定义 Math 抛异常→返回0（MT2 商人 3% 祝福曾因此 +0）。见 mechanics §B
+    s = (s.replace("Math.round(", "_mround(")
+           .replace("Math.floor(", "_mfloor(")
+           .replace("Math.ceil(", "_mceil("))
+    ns = {"__builtins__": {}, "_mround": lambda x: math.floor(x + 0.5),
+          "_mfloor": math.floor, "_mceil": math.ceil}
     try:
-        return int(eval(s, {"__builtins__": {}}))  # noqa: S307
+        return int(eval(s, ns))  # noqa: S307
     except Exception:
         return 0
 

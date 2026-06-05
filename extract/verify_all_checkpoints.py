@@ -11,7 +11,14 @@
   - 3：extract/verify_tok29xx.py（token2501/2804/2965，带坐标）。
   - 5：玩家给（token3212/3371/3704/4012/4141，带坐标）。
   - 6：终局段第一批（token4222/4350/4417/4504/4528/4582，带坐标）。
-  后两批【落盘于此文件】，按 CLAUDE.md「确认过的数值立即落盘」要求持久化。
+  - 7：token4723（带坐标）。
+  - 8：MT0 段 token4925/5156（玩家 2026-06-05 裁定/订正；5156 带金 oracle 1724）。
+  - 9：终局段第三批 10 锚点 token5313/5347/5386/5545/5833/6066/6132/6221/6248/6349（玩家 2026-06-05 给）。
+  全部【落盘于此文件】，按 CLAUDE.md「确认过的数值立即落盘」要求持久化。
+  注：批 8/9 索引为【修正解析器】口径——decode_route 已修 (help) 为单 token；help 区(tok5315/5320)
+      及其菜单 CHOICE 已验证为无副作用 no-op。但批 9 自 tok5347 起 FAIL（sim 比真值少血/少防/
+      后续少钥匙→路径分叉），疑自动操作的秒杀/拾取是回放期每步 hook(route 不另记)，待回 live 引擎
+      抓"游戏说明"事件+自动操作 plugin 坐实并(若需)实现；当前 sim 尚【未】实现自动操作结算。
 """
 import json
 import sys
@@ -27,9 +34,9 @@ FLOORS = DATA / 'floors'
 LEDGER_PATH = Path(__file__).parent.parent / 'checkpoint_ledger.txt'
 
 
-def ck(idx, floor, hp, atk, df, yk=None, bk=None, rk=None, x=None, y=None):
+def ck(idx, floor, hp, atk, df, yk=None, bk=None, rk=None, x=None, y=None, gold=None, won=None):
     return dict(idx=idx, floor=floor, hp=hp, atk=atk, df=df,
-                yk=yk, bk=bk, rk=rk, x=x, y=y)
+                yk=yk, bk=bk, rk=rk, x=x, y=y, gold=gold, won=won)
 
 
 # ── 全部 25 个检查点（按 token 升序）。None 字段=玩家未给该项真值，不比对。──────────────
@@ -71,9 +78,34 @@ CHECKPOINTS = [
     ck(4504, 'MT43', 123,  202, 204, yk=5, bk=2,       x=9,  y=4),
     ck(4528, 'MT44', 623,  202, 304, yk=5, bk=2,       x=6,  y=5),
     ck(4582, 'MT47', 4723, 202, 309, yk=5, bk=2,       x=11, y=2),  # 楼层真值 MT44→MT47：玩家 2026-06-04 主动订正(原标"MT44?"存疑，route 末两跳 FLOOR 显式飞 MT47+坐标/HP/属性/钥匙全吻合为证)，属性不变
-    # 7（终局段第二批，玩家 2026-06-04 给）。仅 token4723 落盘——它在 MT0 入口(tok4921 downFly→MT0)之前，不依赖 MT0。
-    # token4925(MT0)/5156 需 floors/MT0.json（已提取，玩家 2026-06-04 抓取，0 处自定义事件），待玩家补 tok4925/5156 真值后再落盘。
+    # 7（终局段第二批，玩家 2026-06-04 给）。token4723 在 MT0 入口(tok4921 downFly→MT0)之前，不依赖 MT0。
     ck(4723, 'MT41', 4600, 212, 309, yk=14, x=3, y=6),
+    # 8（MT0 段，玩家 2026-06-05 裁定/订正后落盘）。tok4925 坐标(2,5)系玩家订正(原误录(1,5))；
+    #   tok5156 楼层/坐标/金按 sim 订正为 MT16(9,11)/金1724(原误录 MT?(9,6)/1768)——玩家主动订正真值，非凑绿。
+    #   金1724 是幸运金币 coin×2 的 oracle（全 route 仅此点给了金真值）。
+    ck(4925, 'MT0',  4943, 217, 314, yk=20, bk=1,        x=2,  y=5),
+    ck(5156, 'MT16', 5193, 217, 314, yk=17, bk=1,        x=9,  y=11, gold=1724),
+    # 9（终局段第三批 10 锚点，玩家 2026-06-05 给，落盘）。索引为【修正解析器】口径(help=单 token)。
+    #   自动操作(tok5315 起 help 菜单开启)的秒杀/拾取已烘焙为显式 move token，按普通回放即可——
+    #   引擎在 moveHero/battle 层记录每个自动动作，无自定义 replayAction，sim 无需自动结算逻辑(详见 decode_route 坐实)。
+    ck(5313, 'MT36', 5693,  217, 318, yk=14, bk=1,        x=10, y=11),
+    ck(5347, 'MT46', 5893,  217, 322, yk=13, bk=1,        x=11, y=2),
+    ck(5386, 'MT48', 6095,  322, 322, yk=13, bk=1,        x=7,  y=8),
+    ck(5545, 'MT45', 10845, 337, 327, yk=12, bk=2,        x=9,  y=1),
+    ck(5833, 'MT49', 14547, 362, 347, yk=10, bk=3, rk=1),
+    ck(6066, 'MT45', 21141, 482, 347, yk=7,  bk=3, rk=1,  x=2,  y=1),
+    ck(6132, 'MT45', 24141, 492, 357, yk=5,  bk=3, rk=1,  x=10, y=1),
+    # 索引 6221→6222：玩家 2026-06-05 主动订正(记锚点时读的是接受 3% 祝福【后】属性 507/373；
+    #   游戏内 6221-6223 的撞击/选择不直接反映在 token 记录上，实际对应 sim tok6222=CHOICE 祝福生效那步)。
+    #   HP 两处均 26391 吻合，撞击步(6221)属性为祝福前 492/362。属主订正真值，非凑绿。
+    ck(6222, 'MT2',  26391, 507, 373),
+    ck(6248, 'MT25', 22277, 507, 373, yk=3,  bk=1, rk=4),
+    ck(6349, 'MT50', 32487, 507, 373,                     x=6,  y=7),
+    # 10（通关锚点，玩家裁定 win=True + HP=14382）。tok6353=CHOICE:0(榜单"生命值")→
+    #   afterBattle["6,5"] 榜单 while 经 break 跳出 → 续跑循环外 type:win → won=True(软终止)。
+    #   HP=14382=32487(tok6349)−18105：MT50魔王 setEnemy hp5000/atk1580/def190；勇者ATK507vs防190
+    #   每刀317→⌈5000/317⌉=16刀；受 boss ATK1580vs防373=1207/刀×(16−1)=18105。boss金500×幸运币2→g1928。
+    ck(6353, 'MT50', 14382, 507, 373, x=6, y=5, won=True),
 ]
 MAXTOK = max(c['idx'] for c in CHECKPOINTS)
 
@@ -114,6 +146,7 @@ def full_snap(s):
         yk=h.keys.get('yellowKey', 0), bk=h.keys.get('blueKey', 0),
         rk=h.keys.get('redKey', 0),
         items={k: v for k, v in h.items.items() if v},
+        won=getattr(s, 'won', False),
     )
 
 
@@ -125,7 +158,7 @@ def cmp_checkpoint(c, snap):
     if c['x'] is not None and (snap['x'], snap['y']) != (c['x'], c['y']):
         errs.append(f"pos sim=({snap['x']},{snap['y']}) 真值=({c['x']},{c['y']})")
     for key, label in (('hp', 'HP'), ('atk', 'ATK'), ('df', 'DEF'),
-                       ('yk', '黄'), ('bk', '蓝'), ('rk', '红')):
+                       ('yk', '黄'), ('bk', '蓝'), ('rk', '红'), ('gold', '金')):
         exp = c[key]
         if exp is None:
             continue
@@ -133,10 +166,16 @@ def cmp_checkpoint(c, snap):
         if got != exp:
             errs.append(f"{label} sim={got} 真值={exp} 差={got - exp:+d}")
     sim_str = (f"{snap['floor']}({snap['x']},{snap['y']}) HP={snap['hp']} "
-               f"ATK={snap['atk']} DEF={snap['df']} 黄={snap['yk']} 蓝={snap['bk']} 红={snap['rk']}")
+               f"ATK={snap['atk']} DEF={snap['df']} 黄={snap['yk']} 蓝={snap['bk']} 红={snap['rk']} 金={snap['gold']}")
     tp = lambda v: '·' if v is None else v
     truth_str = (f"{c['floor']}({tp(c['x'])},{tp(c['y'])}) HP={c['hp']} "
-                 f"ATK={c['atk']} DEF={c['df']} 黄={tp(c['yk'])} 蓝={tp(c['bk'])} 红={tp(c['rk'])}")
+                 f"ATK={c['atk']} DEF={c['df']} 黄={tp(c['yk'])} 蓝={tp(c['bk'])} 红={tp(c['rk'])} 金={tp(c['gold'])}")
+    # 通关锚点：仅当真值给了 won 才比对(与死亡硬终止对偶的软终止标志)。
+    if c.get('won') is not None:
+        if snap.get('won') != c['won']:
+            errs.append(f"won sim={snap.get('won')} 真值={c['won']}")
+        sim_str += f" win={snap.get('won')}"
+        truth_str += f" win={c['won']}"
     return errs, sim_str, truth_str
 
 
