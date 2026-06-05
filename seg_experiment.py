@@ -73,20 +73,44 @@ def _fmt_vec(v):
 
 
 def _route_vec(route_exit, items_db):
-    """把 cfg 里的 route 真值展开成完整 Pareto 向量（持有属性 + 持有钥匙 + 地图剩余 HP 消耗品）。
-    keys/map 为 cfg 可选项（塔特有真值）。**map 必须投影到与搜索前沿同口径**——只保留 HP
+    """把 cfg 里的 route 真值展开成完整 Pareto 向量（持有属性 + 持有钥匙 + 持有道具 + 地图剩余 HP 消耗品）。
+    keys/items/map 为 cfg 可选项（塔特有真值）。**map 必须投影到与搜索前沿同口径**——只保留 HP
     消耗品(经 _gives_hp_on_pickup 数据驱动判定)；宝石/钥匙等非消耗品的地图剩余不计(它们拿到
     才兑现，留在地上不是 Pareto 优点，见 docs/solver-design.md 的建模粒度裁定)。否则 route_vec
-    会比前沿多出「map:钥匙」这类无人能及的维度→route 虚假非支配(A 段历史误判正源于此)。"""
+    会比前沿多出「map:钥匙」这类无人能及的维度→route 虚假非支配(A 段历史误判正源于此)。
+
+    持有维须与 _value_map 同口径：含 mdef(缺省 0)与 item:*(背包道具)。item:* 是否参与比较交给
+    _project_for_compare 按 cls 数据驱动裁剪——本函数如实展开，不在此处过滤。"""
     rv = {"hp": route_exit["hp"], "atk": route_exit["atk"],
-          "def": route_exit["def"], "gold": route_exit["gold"],
-          "kill": route_exit["kill"]}
+          "def": route_exit["def"], "mdef": route_exit.get("mdef", 0),
+          "gold": route_exit["gold"], "kill": route_exit["kill"]}
     for k, val in route_exit.get("keys", {}).items():
         rv["key:" + k] = val
+    for k, val in route_exit.get("items", {}).items():
+        rv["item:" + k] = val
     for k, val in route_exit.get("map", {}).items():
         if _gives_hp_on_pickup(items_db.get(k)):
             rv["map:" + k] = val
     return rv
+
+
+def _project_for_compare(vec, items_db):
+    """把 Pareto 向量投影到「可比口径」后再做支配判定——只裁剪 item:* 维，其余维原样保留。
+
+    item:* 维只保留【消耗品道具】(cls=='tools'，会随使用减少→余量是真价值维，如 centerFly/bomb/
+    earthquake 剩几个，段间传前沿时关键)；【常驻能力道具】(cls=='constants' 及其它不消耗类，如
+    fly/wand/book/I333)一律投影掉——它们段内既不获取也不消耗、两边永远相同，只会制造假胜负。
+
+    B 段历史误判正源于此：某前沿点与 route 各属性全等，仅因前沿向量带 item:fly=1 而 route_vec
+    缺该维(当 0)→虚假「严格支配」route。cls 按 items.json 数据驱动读(items_db)，绝不写死 id，塔无关。"""
+    out = {}
+    for k, v in vec.items():
+        if k.startswith("item:"):
+            iid = k.split(":", 1)[1]
+            if (items_db.get(iid) or {}).get("cls") != "tools":
+                continue  # 常驻/不消耗道具：两边恒等，投影掉
+        out[k] = v
+    return out
 
 
 def _dominates(a, b):
@@ -170,15 +194,18 @@ def run_segment(cfg):
     # —— 严格更优查询（完整向量：HP/ATK/DEF + 持有钥匙 + 地图剩余资源）——
     # 修正历史误判：旧查询只比 ATK/DEF/HP，漏了钥匙(硬通货)与地图剩余资源(战略储备)，
     # 会把「吃掉储备血瓶 + 少持钥匙」的高 HP 出口误判为严格更优。见 docs/solver-design.md。
-    route_vec = _route_vec(route_exit,
-                           entry.floors[entry.current_floor]._items_db)
+    items_db = entry.floors[entry.current_floor]._items_db
+    route_vec = _route_vec(route_exit, items_db)
     has_keys = any(k.startswith("key:") for k in route_vec)
     has_map = any(k.startswith("map:") for k in route_vec)
     print(f"\nPareto 严格更优查询（完整向量支配 route 出口"
           f"{'；含钥匙' if has_keys else '；⚠cfg未给route钥匙真值'}"
           f"{'；含地图剩余资源' if has_map else '；⚠cfg未给route地图剩余真值'}）:")
     print(f"  route 完整向量: {_fmt_vec(route_vec)}")
-    strictly_better = [v for v in fr if _dominates(v, route_vec)]
+    # 两边同口径投影后再判支配：常驻道具(cls!=tools)两边恒等、投影掉，避免假胜负(见 _project_for_compare)。
+    route_cmp = _project_for_compare(route_vec, items_db)
+    strictly_better = [v for v in fr
+                       if _dominates(_project_for_compare(v, items_db), route_cmp)]
     if strictly_better:
         print(f"  [是] 找到 {len(strictly_better)} 个【完整向量】严格支配 route 的出口:")
         for v in strictly_better:
