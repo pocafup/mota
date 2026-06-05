@@ -500,6 +500,44 @@ def _use_pickaxe(state: GameState) -> None:
         del hero.items["pickaxe"]
 
 
+def _use_big_key(state: GameState) -> None:
+    """魔法钥匙 bigKey（引擎名"魔法钥匙"，cls=tools；sim 存于 hero.keys）：开当前层【所有 yellowDoor】。
+    引擎 useItemEffect（core.material.items.bigKey.useItemEffect toString，2026-06-05 实测）：
+        core.searchBlock("yellowDoor").map(b => openDoor loc:[b.x,b.y] async); waitAsync; tip(...)
+    即把当前层每一扇黄门 openDoor→空地。**仅黄门**（searchBlock 只查 'yellowDoor'，蓝/红/绿/铁门不开）；
+    canUseItemEffect=true（无前置）；cls=tools 用后 -1（§K.2）。openDoor 语义与本 sim 既有 openDoor action
+    一致 = terrain 置 0（不触发 afterOpenDoor，本塔 MT41 afterOpenDoor 为空）。yellowDoor tile 取模块通用
+    映射 _DOOR_ID_TO_TILE（与 openDoor/closeDoor 同源，h5mota 引擎通用约定，非塔特有硬编码）。"""
+    hero, floor = state.hero, state.floor
+    if hero.keys.get("bigKey", 0) <= 0:
+        return
+    yd = _DOOR_ID_TO_TILE["yellowDoor"]
+    rows = len(floor.terrain)
+    cols = len(floor.terrain[0]) if rows else 0
+    for y in range(rows):
+        row = floor.terrain[y]
+        for x in range(cols):
+            if row[x] == yd:
+                row[x] = 0  # openDoor：黄门→空地（可达性实时重算自动生效）
+    hero.keys["bigKey"] -= 1
+    if hero.keys["bigKey"] <= 0:
+        del hero.keys["bigKey"]
+
+
+def _use_super_potion(state: GameState) -> None:
+    """圣水 superPotion（cls=tools）：HP += round(0.74*(atk+def))*10，用后 -1。
+    来源 items.js useItemEffect 字面量（§B.3）。round = JS Math.round = floor(x+0.5)，
+    x=0.74*(atk+def) 恒正，用 int(x+0.5) 实现。获取自 MT16 老人 item:superPotion+=1。"""
+    hero = state.hero
+    if hero.items.get("superPotion", 0) <= 0:
+        return
+    heal = int(0.74 * (hero.atk + hero.def_) + 0.5) * 10
+    hero.hp += heal
+    hero.items["superPotion"] -= 1
+    if hero.items["superPotion"] <= 0:
+        del hero.items["superPotion"]
+
+
 def _use_floor_fly_item(state: GameState, item_id: str, step_dir: int) -> None:
     """upFly(step_dir=+1)/downFly(step_dir=-1)：切到当前层 floorIds 下标 ±1 的楼层。
     与 fly 魔杖（_execute_floor_fly）不同：
@@ -537,6 +575,15 @@ def _use_floor_fly_item(state: GameState, item_id: str, step_dir: int) -> None:
         del hero.items[item_id]
 
 
+def _enemy_gold(hero: HeroState, base: int) -> int:
+    """战斗击杀金币结算：拥有幸运金币(coin, tile53, MT0(6,6) 拾取)后金币×2（被动经济道具）。
+    效果来源：common_events.json 图书馆提示「拥有它在打败敌人后能获得2倍的金钱」+ items.json coin(cls=constants/use=null)。
+    覆盖普通战 _fight_monster 与 battle 指令 _forced_battle 两条击杀路径。
+    ⚠ bomb 炸杀(_use_bomb)分支【暂不乘】：本 route bomb(tok4524 MT44) 在 coin 拾取(MT0, tok4921 之后)之前，
+    二者不同时发生；bomb×coin 交互的引擎 afterBattle 源码未抓取，solver 启动前必须坐实，登记于 mechanics §J。"""
+    return base * 2 if hero.items.get("coin", 0) > 0 else base
+
+
 def _use_bomb(state: GameState) -> None:
     """炸弹(tile49, cls=tools)：炸掉英雄四方向相邻、hp<500 的敌人。来源 §I.7（引擎 bomb.useItemEffect toString）。
     引擎逐条：
@@ -572,6 +619,8 @@ def _use_bomb(state: GameState) -> None:
     # 先批量移除并结算金币（引擎 removeBlockByIndexes + money），再统一触发 afterBattle
     for x, y, monster_id in kills:
         floor.entities[y][x] = 0
+        # bomb 炸杀金币【不】乘 coin×2（不走 _enemy_gold）：bomb×coin 交互待引擎 afterBattle 源码坐实，见 §J。
+        # 本 route bomb(tok4524) 早于 coin 拾取(MT0)，二者不同时发生，此处不乘不影响回放正确性。
         hero.gold += floor._monsters_db[monster_id].get("gold", 0)
     for x, y, monster_id in kills:
         loc_key = f"{x},{y}"
@@ -601,6 +650,10 @@ def _use_item_by_id(state: GameState, item_id: str | None) -> None:
         _use_bomb(state)
     elif item_id == "pickaxe":
         _use_pickaxe(state)
+    elif item_id == "superPotion":
+        _use_super_potion(state)
+    elif item_id == "bigKey":
+        _use_big_key(state)
     _check_auto_events(state)
 
 
@@ -877,6 +930,13 @@ def _process_move(state: GameState, direction: str) -> None:
     e_tile = floor.entities[ny][nx]
 
     if t_tile in WALL_TILES or t_tile in floor._no_pass_tiles or t_tile == SPECIAL_DOOR:
+        # 撞 noPass/墙/特殊门：先看目标格有无【启用】事件并触发（互动不移入，英雄停原格）。
+        # 隐藏怪假墙机制（MT41(10,2)）：人在(9,2)按 R 撞 330 假墙→events[10,2] 的 if 按
+        # status:x===9&&status:y===2&&flag&&hasVisitedFloor 求值，成立则 setBlock 现身怪+置 flag。
+        # 方向性由 if 条件自带（从(11,2)按 L 时 status:x===11≠9→false 分支空→不触发）。
+        # _fire_events 自带门控：无事件/被 suppress/enable:false 直接返回 = 普通撞墙(原地)。
+        # 通用：不分塔，事件存在与否、条件成立与否全由 data 的 events 决定，无硬编码。
+        _fire_events(state, nx, ny)
         return
 
     if e_tile in floor._tile_to_enemy:
@@ -1060,7 +1120,7 @@ def _fight_monster(state: GameState, mx: int, my: int) -> None:
         return
 
     hero.hp -= result.damage
-    hero.gold += floor._monsters_db[monster_id].get("gold", 0)
+    hero.gold += _enemy_gold(hero, floor._monsters_db[monster_id].get("gold", 0))  # 幸运金币×2
     hero.kill_count += 1
     floor.entities[my][mx] = 0
     hero.x, hero.y = mx, my
@@ -1092,7 +1152,7 @@ def _forced_battle(state: GameState, enemy_id: str) -> None:
     if result.damage is None:
         return  # 打不动(hero_per==0)：route 不会到此
     hero.hp -= result.damage          # force：不拦截，直接扣血（可致 hp<=0 = 死亡）
-    hero.gold += floor._monsters_db[enemy_id].get("gold", 0)
+    hero.gold += _enemy_gold(hero, floor._monsters_db[enemy_id].get("gold", 0))  # 幸运金币×2
     hero.kill_count += 1
     _apply_post_combat_effects(hero, result)
     if hero.hp <= 0:
@@ -1342,13 +1402,17 @@ def _execute_instruction(
         except (ValueError, TypeError):
             # 字符串 tile id → 反查编号（全量映射，含门/墙/地形，如 specialDoor/yellowWall）。见 mechanics §M.5
             num = tf._id_to_tile_full.get(str(num_raw), 0)
-        for loc in instr.get("loc", []):
+        locs = instr.get("loc")
+        if not locs:
+            locs = [[event_x, event_y]]   # 无 loc：默认事件自身格（如 MT41(10,2) destruct 现身怪）
+        for loc in locs:
             lx, ly = loc[0], loc[1]
             if num == 0:
                 tf.entities[ly][lx] = 0
                 tf.terrain[ly][lx] = 0
             elif num in tf._tile_to_entity:
                 tf.entities[ly][lx] = num
+                tf.terrain[ly][lx] = 0   # 实体覆盖：清底层地形（假墙330→0），与引擎"一格一块"一致，怪才能被战斗走入
             else:
                 tf.terrain[ly][lx] = num
                 tf.entities[ly][lx] = 0
@@ -1403,7 +1467,13 @@ def _execute_instruction(
     if t == "closeDoor":
         loc = instr.get("loc")
         lx, ly = (event_x, event_y) if loc is None else (loc[0], loc[1])
-        floor.terrain[ly][lx] = _DOOR_ID_TO_TILE.get(instr.get("id", ""), 85)
+        did = instr.get("id", "")
+        # id 走全量 id→tile 反查（如 yellowWall→1，afterBattle[10,2] 用它把蓝门口封成黄墙）；
+        # 全量表无则回退门映射，再无则 85(specialDoor)。门类编号两表同源，旧行为不变。
+        tile = floor._id_to_tile_full.get(did)
+        if tile is None:
+            tile = _DOOR_ID_TO_TILE.get(did, 85)
+        floor.terrain[ly][lx] = tile
         return
 
     # ── setValue ──────────────────────────────────────────────────────────────
@@ -1653,6 +1723,32 @@ def _eval_single(part: str, state: GameState) -> bool:
         return {">=": cnt >= num, "<=": cnt <= num, "==": cnt == num,
                 "!=": cnt != num, ">": cnt > num, "<": cnt < num}[op]
 
+    # ── 嵌套括号 && 片段的兜底匹配 ──────────────────────────────────────────────
+    # 形如 ((flag:41==1 )&&(( status:x===9 )&&(( status:y===2 )&& core.hasVisitedFloor('MT42'))))
+    # 的条件按 && 切分后，片段会带不平衡分组括号和空格（如 "((flag:41==1 )"、" core.hasVisitedFloor('MT42'))))"），
+    # 上面的锚定 re.match 分支匹配不到。用 re.search 在片段内定位谓词，容忍周围括号/空格。
+    # === / !== 按 JS 严格等价，等同 == / !=。status:x/y = 英雄当前坐标（撞墙互动时尚未移动）。
+    OPS = {">=": lambda a, b: a >= b, "<=": lambda a, b: a <= b, ">": lambda a, b: a > b,
+           "<": lambda a, b: a < b, "==": lambda a, b: a == b, "!=": lambda a, b: a != b}
+
+    m = re.search(r"flag:(\w+)\s*(===|!==|>=|<=|==|!=|>|<)\s*(-?\d+)\b", part)
+    if m:
+        op = m.group(2).replace("===", "==").replace("!==", "!=")
+        lhs_raw = hero.flags.get(m.group(1), 0)
+        lhs = int(lhs_raw) if isinstance(lhs_raw, (int, float)) else 0
+        return OPS[op](lhs, int(m.group(3)))
+
+    m = re.search(r"status:(\w+)\s*(===|!==|>=|<=|==|!=|>|<)\s*(-?\d+)\b", part)
+    if m:
+        op = m.group(2).replace("===", "==").replace("!==", "!=")
+        stat_map = {"x": hero.x, "y": hero.y, "hp": hero.hp,
+                    "atk": hero.atk, "def": hero.def_, "money": hero.gold}
+        return OPS[op](stat_map.get(m.group(1), 0), int(m.group(3)))
+
+    m = re.search(r"core\.hasVisitedFloor\('(\w+)'\)", part)
+    if m:
+        return m.group(1) in state.visited_floors
+
     return False
 
 
@@ -1732,6 +1828,19 @@ def _set_value(state: GameState, name: str, value, operator: str | None = None) 
             else:                  hero.def_ = num
         if hero.hp <= 0:
             state.dead = True   # 事件扣血致死 → 冻结于死亡点（§M.8）
+    elif name.startswith("item:"):
+        # 道具增减（setValue name=item:<id>）：钥匙类入 keys，其余入 items。
+        # 来源：MT16 老人给圣水(item:superPotion+=1)、MT28 回收钥匙(item:yellowKey-=1) 等。
+        # 旧实现缺此分支 → item: 静默 no-op（圣水/钥匙增减全丢失），本次补齐。
+        item_id = name[5:]
+        target = hero.keys if item_id in _KEY_ITEMS else hero.items
+        delta = val if isinstance(val, int) else 1
+        if operator == "+=":
+            target[item_id] = target.get(item_id, 0) + delta
+        elif operator == "-=":
+            target[item_id] = target.get(item_id, 0) - delta
+        else:
+            target[item_id] = delta
 
 
 # ─── autoEvent ───────────────────────────────────────────────────────────────

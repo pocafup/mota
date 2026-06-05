@@ -1738,6 +1738,61 @@ core.playSound('破墙镐');
 
 ---
 
+## G7. MT41 隐藏怪 (10,2) 揭示链 + afterBattle 地形重塑（"道具出现+地形变化"机关真身）
+
+> 来源：`MT41.json` events["10,2"] / afterBattle["2,2"] / afterBattle["10,2"]（live engine 提取，逐字段核对）。
+> 这是 handoff 里 **G7 机关** 的真身：玩家实测「打败隐藏怪 → 降临之翼(downFly)出现 + 地形同时变化」。
+> **downFly 全塔唯一来源**：本 afterBattle 的 `setBlock downFly@(6,5)`（grep `data/games51/floors/*.json` 全塔仅此一处占位 + 玩家 2026-06-05 确认）。
+
+### G7.1 揭示链（reveal）三段前置
+
+1. **flag:41=1** ← 杀 (2,2) redWizard220。`afterBattle["2,2"]: setValue flag:41=1`。
+2. **hasVisitedFloor('MT42')=true** ← 首次到过 MT42（本 route tok4153 经 (6,10)→MT42）。
+3. **英雄站到 (9,2)** 并触发 (10,2) 假墙格（(10,2)=330 noPass，英雄站其左 (9,2) 朝右撞墙触发其 events）。
+
+`events["10,2"]` 的 if 条件（源码原文）：
+`((flag:41==1)&&((status:x===9)&&((status:y===2)&&core.hasVisitedFloor('MT42'))))`
+- `status:x/status:y` = 英雄当前坐标；条件即「英雄在 (9,2)」。
+- 三者全真 → true 分支：`playSound 开关门` → `sleep` → **`setBlock 220 destruct`**（无 loc = 本事件格 (10,2)，把假墙就地变成 redWizard220 现身）→ `setValue flag:41=2` → `sleep`。
+- ∴ (10,2) 隐藏怪 = **第二只 redWizard220**，站 (9,2) 触发假墙后现身，再按一次右键打它 → afterBattle["10,2"]。
+
+### G7.2 afterBattle["10,2"]：杀隐藏怪后的 13 条指令逐条翻译
+
+| # | 指令 | 作用 | 改哪格 |
+|---|------|------|--------|
+| 1 | `sleep 200` | 演出节奏 | 无（sim no-op） |
+| 2 | `playSound 开关门` | 音效 | 无 |
+| 3 | `setBlock 0, loc:[[5,6],[7,6]]` | 先把 (5,6)(7,6) 清空（为下一步关门铺位） | (5,6)→0, (7,6)→0 |
+| 4 | `closeDoor yellowWall, loc:[5,6]` | 在 (5,6) 落一道黄墙 | (5,6)→yellowWall(1) |
+| 5 | `closeDoor yellowWall, loc:[6,6]` | 在 (6,6) 落黄墙（封脊柱） | (6,6)→yellowWall(1) |
+| 6 | `closeDoor yellowWall, loc:[7,6]` | 在 (7,6) 落黄墙 | (7,6)→yellowWall(1) |
+| 7 | `openDoor loc:[5,7]` | 打开 (5,7) 使可通行 ⚠️见下注 | (5,7)→0（待核对） |
+| 8 | `openDoor loc:[7,7]` | 打开 (7,7) 使可通行 ⚠️见下注 | (7,7)→0（待核对） |
+| 9 | `waitAsync` | 等 3–8 的 async 动画 | 无 |
+| 10 | `setBlock downFly, loc:[[6,5]]` | **放降临之翼道具** | (6,5)→downFly(52) |
+| 11 | `setBlock yellowWall, loc:[[7,1]]` | (7,1) 原 330 假墙 → 黄墙 | (7,1)→yellowWall(1) |
+| 12 | `tip "降临之翼出现了"` | 提示文字 | 无 |
+| 13 | `hide remove:true` | 事件自毁（防重复触发） | (10,2) 事件块移除 |
+
+> ⚠️ **第 7/8 条待坐实（看不懂的单条，已问玩家）**：map 初始 (5,7)=(7,7)=1（墙），对墙格 `openDoor` 的确切结果（变 0？变某门？）需回引擎源码确认。功能意图清楚（让 row-7 变通路），但精确 tile 值标待核对，不在 sim 写死。
+
+**净效果（= 玩家说的"地形也会变化"）**：
+- **封死 row-6 旧横向通道**：(5,6)(6,6)(7,6) 三格 → yellowWall。原来左右互通的**唯一** row-6 通道 (7,6) 被堵死。
+- **打开 row-7 新横向通道**：(5,7)(7,7) → 通，配 (6,7)=81 黄门（早开过）→ 形成 (5,7)-(6,7)-(7,7) 新左右通路。
+- **放 downFly@(6,5)** 供拾取；(7,1)→黄墙。
+- 一句话：**杀隐藏怪 → 降临之翼出现在脊柱 (6,5) + 横向通道从 row-6 下移到 row-7**。
+
+### G7.3 sim 实现状态：⚠️ 整条链**未实现**，且 route 重放**够不到触发点**（核心 blocker）
+
+- **未实现的语义**（仅 MT41 用到，实现零回归风险）：① `status:x/status:y` 求值；② `core.hasVisitedFloor`；③ **撞 noPass(330) 假墙触发其 events**（`simulator.py:906` 撞 noPass 直接 return，不触发事件）；④ `setBlock 220 destruct`（无 loc = 就地、destruct 语义）；⑤ afterBattle 的 `closeDoor yellowWall`/`openDoor`/`setBlock downFly` 地形重塑。
+- **但实现这些还不够**：忠实重放（已证 decode 逐字节正确、门=开停模型、几何 BFS）下，**英雄全 6 次 MT41 访问 maxx 恒=6，从不跨 (7,6) 进右半区**，∴ 永远到不了 (9,2) 去触发 (10,2)。
+  - 关键 token：tok4719 `L` 开 (5,6) / tok4720 `R` 开 (7,6)（蓝钥 1→0），紧接 tok4721–4724 `L4` 向左走，此后再不回 (6,6)。原始 RLE = `U4LRL4U`（逐字节核对，无解码 bug）。
+  - 此访问 fly 锚定落 (6,10)，走脊柱到 (6,6) 全程位置可验证正确到 tok4720；**分叉精确定位在 tok4720→4721**。
+  - 连锁：(10,2) 永不现身 → afterBattle 不放 downFly → tok4916 到 (6,5) 拾空 → downFly 计数恒 0 → **tok4921 ITEM:52 空放 no-op**（英雄卡 MT1(2,1)，tok4922-4925 `D` 全撞墙）→ 终局全段 desync。
+- **矛盾（待玩家裁定，见 §J-G7c）**：downFly 全塔唯一来源 = (10,2) afterBattle（已证）；tok4921 确用 downFly；∴ 真实英雄必杀过 (10,2)、必跨过 (7,6)。但忠实解码的 route 在 (6,6) 开了 (7,6) 却向左走、全程不跨。**数据无法自洽**，需玩家指认真实英雄如何/哪个 token 跨到右半区。
+
+---
+
 ## J. 未确认项
 
 以下条目标记为**待确认**，禁止在模拟器中假设：
@@ -1762,3 +1817,5 @@ core.playSound('破墙镐');
 | J13 | **神圣盾免疫地形伤害**（玩家预告）：神圣盾对应哪个 flag？是 `flag:魔法免疫`／`no_zone`／`no_repulse`／`no_betweenAttack` 之一，还是独立护盾计数？获取楼层/条件？回源码坐实后接入 `_apply_zone_damage` 免疫判定（见 §C.7） | 中 |
 | J14 | **MT43 移动的魔法警卫**（玩家预告）：MT43 whiteKing(246)@... 是否每回合/每步移动？移动规则（朝勇者?巡逻?）？sim 当前按静态怪处理——若实为移动怪，夹击触发格随之变，需建模移动 | 中 |
 | ~~J15~~ | ~~MT48 地震卷轴破 MT37 墙~~ | ✅ **已实现**（§L.6）：商人在 **MT47(5,2)**（非 MT48，原笔误已订正）price4000 give earthquake；经 **KEY:52**（键'4'）使用，效果=清**当前层全图**所有 canBreak 墙（tile 1/2），**不跨层**（在 MT37 当层用，破 MT37 自身墙）。token4417 属性全吻合 |
+| **J-G7c** | **MT41 右半区跨越口径矛盾（核心 blocker，见 §G7.3）**：downFly 全塔唯一来源 = (10,2) afterBattle；tok4921 确用 downFly；∴ 真实英雄必跨 (7,6) 杀 (10,2)。但忠实解码 route（原始 RLE `U4LRL4U` 逐字节核对、门=开停模型已证、几何 BFS 已证）在 (6,6) 开 (7,6) 后走 `L4` 向左、全 6 次访问 maxx=6 从不跨。**待玩家指认**真实英雄如何/哪个 token 进右半区，或核对 route 文件/fly 落点/某 token 语义 | **高（堵终局对齐）** |
+| **J16** | **bomb × coin（幸运金币）交互待源码坐实**：拾 coin(53) 后「击杀金币×2」是否覆盖 **bomb 炸怪** 的掉金？普通战斗/battle 指令已纳入×2，bomb 暂**不×2、记此待确认**。回 `core.useBomb`/炸弹结算源码坐实后接入 | 中 |

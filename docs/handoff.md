@@ -5,6 +5,18 @@
 
 ---
 
+## 🟢 提取 MT0 地下室 + 幸运金币×2 / bigKey 全开黄门 / 撞假墙 reveal 链（G7 解决）/ 圣水：token4723/4925 转绿，35/36 检查点 PASS（2026-06-05，待提交）
+
+- **进展**：**35/36 PASS**，**对齐至 token4925**（MT0 已通、coin 幸运金币已拾、reveal 链 / G7 已解决），**全部道具机制实现完毕**。本段消掉 tok4723/4925 两个 FAIL：
+  1. **MT0 地下室落盘**：`data/games51/floors/MT0.json`（玩家 2026-06-04 引擎抓取）。地下室全空：(1,1)=87 上楼→MT1、(6,6)=53 coin，`events / afterBattle / firstArrive / autoEvent` 全空 = **无自定义事件需建模**；仅 downFly（从 MT1）可进、(1,1) 楼梯回 MT1。
+  2. **幸运金币 ×2**：coin（tile 53，MT0(6,6) 拾）= 被动，持有后全程击杀金币翻倍，门控在 `_enemy_gold`（`hero.items.get("coin")>0`）。
+  3. **bigKey 大黄门钥匙全开黄门**、**圣水（`item:` 前缀修复）**：随机制落 `mechanics_51.md`。
+  4. **撞假墙 reveal 链（G7 解决）**——MT41 (10,2) 隐藏怪触发链（源码坐实，详见 `mechanics_51.md` §G7，**已实现**）：① 杀**左侧** (2,2) redWizard → `afterBattle["2,2"]` 设 `flag:41=1`；② 英雄到**右侧** (9,2)、`hasVisitedFloor('MT42')`、按 R 撞 (10,2)=330 假墙 → `events["10,2"]` 条件 `flag41==1 && status:x===9 && status:y===2 && visited(MT42)` 为真 → `setBlock 220 destruct` 放出 redWizard、`flag41=2`；③ 杀该怪 → `afterBattle["10,2"]` 封 (5,6)(6,6)(7,6)=yellowWall、开 (5,7)(7,7)、(6,5) 放 **downFly**、(7,1)=yellowWall、自毁。④ 英雄拾 downFly（tok4916）→ downFly 下飞 MT0（tok4921）→ 拾 coin → 回 MT1。**sim 改动**：撞 noPass/墙/特殊门时先按条件求值该格 `events`，成立则触发（英雄当步不移入）；setBlock 无 loc 默认事件自身格、放实体时清底层地形（假墙 330→0 怪才可被战斗走入）；条件求值器补 `===/!==` / `status:x,y` / `core.hasVisitedFloor`。**锚点全中**：tok4858 英雄已在 MT41(10,2)、tok4916 downFly=1。**零回归**：68 测试 + 33 检查点全 PASS。
+- **唯一 FAIL — token5156**：真值 `MT?(9,6) HP=5193 ATK=217 DEF=314 黄=17 蓝=1 金=1768`（金 1768 = 幸运金币 ×2 的 oracle）；sim 停 `MT16(9,11) 金=1724`（**pos (9,11) vs (9,6)、金 1724 vs 1768 差 −44**；HP/ATK/DEF/黄/蓝/coin 全吻合）。窗口 **token[4925→5156]**，分叉在 **MT0 回 MT1 之后某处**；金差 −44 = coin×2 生效后某场战斗的金币差或漏打一只小怪，**逐笔账待玩家裁定**。
+- **终局剩余**：**token5156→6360**——**pickaxe@5391**、**help 键@5315–26**（no-op）、**centerFly@6354**、**圣水@6346**、**MT26 公主设 flag → MT24 传送 MT50 → MT49 竞技场（/10 魔王）→ MT50 杀 boss = win**（杀死即重放终止）。
+
+---
+
 ## 🟢 实现 earthquake/bomb/pickaxe/upFly-downFly + KEY 派发表 + MT44 隐藏层单向楼梯：token4417/4504/4528/4582 转绿，32/32 检查点全 PASS，对齐至 token4582(MT47)（2026-06-04，commit 1e84590）
 
 - **进展**：**32/32 检查点全 PASS**，**模拟器逐 token 对齐至 token4582**，**全塔 50 层数据齐备**，**全部道具（snow / centerFly / earthquake / bomb / pickaxe / 飞翼 upFly-downFly）已实现**。本段把 KEY 快捷键体系坐实并补齐最后几个道具，消掉 token4417/4504/4528/4582 四个 FAIL：
