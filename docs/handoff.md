@@ -5,6 +5,33 @@
 
 ---
 
+## 🟢 solver MVP B段（MT17·装备阈值决策）闭环：三条验收全过 + 出口 Pareto 前沿 + 严格更优查询【cls 数据驱动口径修正】——route 坐实在前沿、装备阈值两子前沿实证（2026-06-05，commit 854759d）
+
+> 入口 `tokens[:1462]` → MT17(5,11) HP655/A44/D32 → 出口格 MT17(2,11)(token≈1499)。塔特有参数由 `mvp_b.py` 注入、通用闭环在 `seg_experiment.run_segment`，`solver/` 全程塔无关。route 真值取自 route 全程重放(见 `diag_mvp_b_truth.py`)。
+
+### B段结论：回路闭环成立 + route 是该段 Pareto 前沿上的非支配点
+- **三条验收全过**：① 找到到 MT17(2,11) 的合法 **21 步**路线 `URRDRRRRLLLLULLDLLLLR`；② 搜索宣称终态 == 引擎独立重放终态(逐字段一致)；③ 终态 HP=719 ≥ 基准 459。
+- **出口 Pareto 前沿 = 44 个非支配点**(goal_hits=1342)，ATK 仅 ∈{44,64}、DEF≡32(段内无人取 MT17 出口仍留地上的 redGem/blueGem——拿宝石不划算是搜索算出的，非预设)。
+- **装备阈值【两子前沿】实证**(搜索涌现，主题正中)：段内 sword2(+20ATK,在(2,2))把前沿劈成两支——
+  - **取剑**：ATK64 子前沿，HP 高点 **591**，代价是吃光地图 2 个储备 redPotion；
+  - **弃剑**：ATK44 子前沿，HP 最高 **719**，代价是永久少 20 攻。
+  两高 HP 点**都不真支配 route**(各自在 redPotion 储备维或 ATK 维落后)——复刻 A段「吃储备血瓶换 HP」的证伪模式，再次印证 `solver-design.md` 的「地图剩余 HP 消耗品」价值维。属性边际价值阶梯状(取剑跨阈值改写后续损血)在此被前沿分叉直观坐实。
+- **route 在前沿**：route 完整向量 `HP=459 ATK=64 DEF=32 金=235 kill=89 黄钥=1 地图剩[bluePotion=1 redPotion=2]`，为非支配点；要 HP 更高必须放弃钥匙或提前清掉地图储备，无「白赚」的严格更优点。
+
+### 口径修正（本段核心教训：item:* 维同 A段「map:钥匙」同根——口径不齐造假胜负）
+- **假支配现象**：严格更优查询曾误报「找到 1 点严格支配 route」——该点与 route **各属性全等**，仅因前沿向量带 `item:fly=1` 而 `route_vec` 缺该维(当 0)→虚假支配。根因：`_value_map` 把 hero.items 全展成 `item:*` 维，而 route_vec 没有 → 口径不齐。
+- **修复（玩家 2026-06-05 裁定，数据驱动细分）**：新增 `seg_experiment._project_for_compare`，按 `items.json` 的 **cls** 裁剪 `item:*` 维后再判支配——**消耗品**(`cls==tools`，会随使用减少→余量是真价值维，如 centerFly/bomb/earthquake 段间传前沿时关键)**保留**；**常驻能力道具**(`cls==constants` 等不消耗类，如 fly/wand/book/I333，段内两边恒等)**投影掉**。两边同口径投影后再比。route_vec 持有维补 `mdef` 对齐 _value_map。**按 cls 从 items.json 读，绝不写死 id，塔无关。**
+- 本段实测：入口/出口 hero.items 全为 constants(fly/I333/book/wand)、无任何 tools 消耗品、mdef=0 → 投影后前沿与 route 同口径 → 结论翻转为「**前沿中无任一点严格支配 route**」(route 在前沿)。
+
+### 性能：B段 11.6K 状态 / 13.4 秒，_copy_state 占比升至 ≈63%（copy 优化依据加强）
+- expanded=11,637 / generated=46,548(≈step 调用数) / 去重指纹=11,093 / 队列峰值=339 / goal_hits=1,342 / hit_cap=False / 搜索耗时 **≈13.4 s** / **288.5 μs/step**。
+- 状态数比 A段少 ≈18×(单层近目标段)，但**每步更贵**：A段 ≈182μs/step → B段 ≈288μs/step，因 B段入口加载 **17 层**(A段更早、层少)，`_copy_state` 每步全量深拷更重。cProfile：`_copy_state` cumtime **≈7.84s/12.47s ≈ 63%**(A段 ≈48%)——**深拷随加载层数线性变贵已坐实**，是 copy 优化(单层段内只深拷当前层)的硬证据。**仍按【选项 2：暂不优化】暂缓**，待 C段(MT33)跑完确认是全局瓶颈后再定，封板引擎(commit fbdfc17 / tag simulator-complete)不冒回归风险。
+
+### 下一步：C段（MT33 极限压测）
+- C段：MT33，**HP=6 极限态**(损血精度试金石)。先重放取 C段 route 真值 → 写 `mvp_c.py` → 跑闭环(沿用本段 cls 口径修正后的 `seg_experiment`)。验收沿用三条 + 出口 Pareto 前沿 + 严格更优查询。
+
+---
+
 ## 🟢 solver MVP A段闭环：BFS+Pareto支配+引擎裁判全通——route 坐实为有效 HP 基准、253 证伪、Pareto 维度定型（2026-06-05，commit fe7da8a）
 
 > 入口 `tokens[:680]` → 出口格 MT8(3,11)。求解器全程**塔无关**(`solver/search.py`)，塔特有参数(层/token/出口/基准/route 真值)由 `mvp_a.py` 注入、通用闭环在 `seg_experiment.run_segment`。设计与领域知识落盘见 `docs/solver-design.md`。
