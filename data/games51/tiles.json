@@ -10,7 +10,7 @@
   },
 
   "walls": {
-    "1": {"id":"yellowWall","noPass":true,"_note":"标准墙（引擎 id=yellowWall，cls=animates）"}
+    "1": {"id":"yellowWall","noPass":true,"canBreak":true,"_note":"标准墙（引擎 id=yellowWall，cls=animates）。canBreak:true 来源 project/maps.js blocksInfo[1].canBreak=true：地震卷轴 earthquake 的 useItemEffect 按 canBreak 过滤清除（见 mechanics §L.6）。"}
   },
 
   "terrains": {
@@ -25,8 +25,8 @@
   },
 
   "animates": {
-    "2":   {"id":"fakeWall","noPass":false,"_note":"假墙，可通行（视觉墙）"},
-    "3":   {"id":"fakeWall2","keys":{},"_note":"假墙2，无需钥匙即可触碰开启（keys={}）"},
+    "2":   {"id":"fakeWall","noPass":false,"canBreak":true,"_note":"假墙，可通行（视觉墙）。canBreak:true 来源 maps.js blocksInfo[2].canBreak=true：地震卷轴可清除。"},
+    "3":   {"id":"fakeWall2","keys":{},"canBreak":false,"_note":"假墙2，无需钥匙即可触碰开启（keys={}）。canBreak:false 来源 maps.js blocksInfo[3].canBreak=false：地震卷轴【不】清除它。"},
     "4":   {"id":"star","noPass":true,"_note":"星空装饰块。来源订正: 引擎 blocksInfo[4]={id:star,cls:animates}（extract/blocksInfo_full.json）、live engine getBlockByNumber(4) noPass=true。旧 tiles.json walls 段误标 4=airwall（id 错，noPass 凑巧同为 true）已删。仅 MT50 顶层铺底(中央5×5 boss竞技场以外全是 star，144 格)，常规移动按 noPass 拦截；centerFly 落点 getBlockId='star'≠airwall→不可落。MT1-49 不出现此 tile（订正零影响面）。"},
     "5":   {"id":"lava","noPass":true,
             "_terrain_damage": "lavaDamage=100 HP/步，持有 amulet 免疫"},

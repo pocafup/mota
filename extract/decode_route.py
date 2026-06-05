@@ -9,7 +9,11 @@ Confirmed token formats (from source analysis):
   C[n]                  -- dialog choice, n is 0-indexed option index
   FMT<floor>:           -- floor-transition marker (player arrives at MT<floor>)
   I<mapID>:             -- use item with map tile ID <mapID>
-  K<n>:                 -- QUESTION: meaning unknown (shop? key?)
+  K<n>                  -- keypress: engine key:<n>, n=keyCode (NO trailing colon).
+                           keyUp(n) 触发存档自定义快捷键绑定 → 等效使用某道具。
+                           keyCode↔字符: 49='1' 50='2' 51='3' 52='4'。
+                           键→道具的绑定是存档特有数据，存 data/games51/replay_keybindings.json，
+                           解析器只忠实产出 KEY:<n>，不在此解析绑定。
   (help)                -- QUESTION: meaning unknown (appears as literal chars)
 """
 
@@ -37,6 +41,7 @@ def parse_rle_route(raw: str) -> list[str]:
       'CHOICE:n'             -- dialog choice n (0-indexed, pending confirmation)
       'FLOOR:MTn'            -- floor transition marker
       'ITEM:n'               -- use item (map tile ID n)
+      'KEY:n'                -- keypress keyCode n (engine key:<n>); 绑定见 sim 数据
       'UNKNOWN:xxx'          -- unrecognized token, flagged for question list
     """
     actions = []
@@ -87,6 +92,17 @@ def parse_rle_route(raw: str) -> list[str]:
             if j < n and raw[j] == ':':
                 j += 1
             actions.append(f'ITEM:{item_id}')
+            i = j
+
+        # Keypress shortcut: K<keyCode>  (engine key:<n>, NO trailing colon)
+        # keyUp(n) 触发存档自定义快捷键 → 等效使用某道具；键→道具绑定是数据，不在此解析。
+        elif c == 'K':
+            i += 1
+            j = i
+            while j < n and raw[j].isdigit():
+                j += 1
+            keycode = raw[i:j]
+            actions.append(f'KEY:{keycode}')
             i = j
 
         # Direct coordinate jump: M<x>:<y>  →  MOVE:x:y

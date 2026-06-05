@@ -1,0 +1,16 @@
+{
+  "_comment": "存档特有的键盘快捷键绑定：keyCode → 道具 id。回放 .h5route 时，KEY:<keyCode> token（引擎 key:<n>，由 keyUp(n) 触发）等效于用物品栏使用该道具。",
+  "_why_data_not_sim": "键→道具的绑定是该存档/该塔的自定义快捷键配置，不是引擎通用逻辑。按架构铁律放 data/<塔>/，sim 只按此表派发，绝不硬编码。",
+  "_source": "keyCode↔字符为 ASCII：49='1' 50='2' 51='3' 52='4'（引擎 _encodeRoute_encodeOne: 'key:n'→'Kn'）。键→道具的具体绑定无法从 route 反推，须玩家在真实引擎逐一实测裁定。",
+  "_status": {
+    "52": "已坐实：玩家 2026-06-04 实测 键'4'=使用地震卷轴 earthquake（tok4369 KEY:52，效果=清当前层 canBreak 墙，开 MT37 内部 → 取 11黄2蓝1红/ATK+16/DEF+16，详见 mechanics §L.6）。推翻了 mechanics §I.8 旧推测‘K52=upFly/downFly’。",
+    "50": "已坐实：玩家 2026-06-04 实测 键'2'=使用炸弹 bomb（tok4524 KEY:50，效果=炸死英雄四方向相邻 hp<500 的怪；MT44(6,9) 一发炸掉 (5,9)(7,9) 两只 redGuard(hp180)→ 触发 floor.afterBattle openDoor(6,8) → 上行取 redPotion/shield5，详见 mechanics §I.7）。bomb 源码条件 hp<500 验证 boss 炸不死。",
+    "49": "已坐实：源码 actionsdata.onKeyUp 的 keyCode 派发表中 case 49 = 无条件 useItem('pickaxe')（键'1'仅绑破墙镐，无 else 备选）。该派发表 case 50/case 52 两行与玩家实测(bomb/earthquake)完全吻合 → 表权威 → case 49=pickaxe 一并坐实(非 route 反推猜测)。route tok5391 KEY:49 = 用破墙镐。"
+  },
+  "_keyup_dispatch_source": "core.actions.actionsdata.onKeyUp(keyCode) 硬编码派发(2026-06-04 实测引擎)：49→pickaxe(破墙镐,无备选); 50→bomb 否则 hammer(圣锤); 51→centerFly(瞬移面板); 52→[icePickaxe,freezeBadge,earthquake,upFly,downFly,jumpShoes,lifeWand,poisonWine,weakWine,curseWine,superWine]按序取首个可用。route.push('key:n') 仅在该道具实际使用成功时发生,故 route 出现 KEY:n ⇒ 对应道具确被使用。",
+  "bindings": {
+    "52": "earthquake",
+    "50": "bomb",
+    "49": "pickaxe"
+  }
+}

@@ -65,13 +65,12 @@ CHECKPOINTS = [
     ck(4012, 'MT40', 870, 166, 122, yk=1,             x=3, y=11),
     ck(4141, 'MT41', 262, 182, 134, yk=7,             x=6, y=2),
     # 6（终局段第一批，玩家 2026-06-04 给，落盘）。DEF 暴涨 134→204→304→309（祭坛MT46/盾，对齐时核）。
-    # token4582 玩家标 "MT44?"（楼层存疑），暂按 MT44 落盘；若 sim 分歧由 FAIL 工作流裁定。
     ck(4222, 'MT32', 1635, 182, 134, yk=2,             x=8,  y=8),
     ck(4350, 'MT47', 1479, 186, 138, yk=2, bk=1,       x=10, y=10),
-    ck(4417, 'MT37', 1479, 202, 154, yk=11, bk=2, rk=1, x=2, y=4),
+    ck(4417, 'MT37', 1479, 202, 154, yk=11, bk=2, rk=1, x=2, y=3),  # 坐标真值 (2,4)→(2,3)：玩家 2026-06-04 主动订正(原实测记错一格)，属性不变
     ck(4504, 'MT43', 123,  202, 204, yk=5, bk=2,       x=9,  y=4),
     ck(4528, 'MT44', 623,  202, 304, yk=5, bk=2,       x=6,  y=5),
-    ck(4582, 'MT44', 4723, 202, 309, yk=5, bk=2,       x=11, y=2),
+    ck(4582, 'MT47', 4723, 202, 309, yk=5, bk=2,       x=11, y=2),  # 楼层真值 MT44→MT47：玩家 2026-06-04 主动订正(原标"MT44?"存疑，route 末两跳 FLOOR 显式飞 MT47+坐标/HP/属性/钥匙全吻合为证)，属性不变
 ]
 MAXTOK = max(c['idx'] for c in CHECKPOINTS)
 
@@ -79,6 +78,8 @@ MAXTOK = max(c['idx'] for c in CHECKPOINTS)
 def build_initial_state():
     floor_ids = json.loads((DATA / 'floorIds.json').read_text(encoding='utf-8'))
     hero_init = json.loads((DATA / 'hero_init.json').read_text(encoding='utf-8'))
+    kb_raw = json.loads((DATA / 'replay_keybindings.json').read_text(encoding='utf-8'))
+    key_bindings = {int(k): v for k, v in kb_raw.get('bindings', {}).items()}
     floor = load_floor(FLOORS / 'MT1.json')
     hero = HeroState(
         x=hero_init['loc']['x'], y=hero_init['loc']['y'],
@@ -89,7 +90,8 @@ def build_initial_state():
     )
     return GameState(hero=hero, floors={'MT1': floor}, current_floor='MT1',
                      floor_ids=floor_ids, visited_floors={'MT1'},
-                     pending_floor_change=None, _floors_dir=FLOORS)
+                     pending_floor_change=None, _floors_dir=FLOORS,
+                     _key_bindings=key_bindings)
 
 
 def load_tokens():

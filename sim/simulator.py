@@ -106,6 +106,9 @@ class FloorState:
     # 全量 tile→id 字符串（getBlockId 语义，来自 tiles.json id 字段）：
     # 供 centerFly 落点判定（认 'airwall' 等）。见 mechanics §I.6
     _tile_to_id: dict = field(default_factory=dict)
+    # 可被地震卷轴 earthquake 破坏的 tile 集合（数据驱动，来自 tiles.json canBreak:true）。
+    # 引擎 earthquake.useItemEffect = searchBlockWithFilter(block.event.canBreak)→openDoor。见 mechanics §L.6
+    _can_break_tiles: set = field(default_factory=set)
 
     @property
     def map(self) -> list:
@@ -133,6 +136,9 @@ class GameState:
     _merchants: dict = field(default_factory=dict)  # 商人目录缓存 {floorId@x@y: {price, give}}
     # setEnemy 临时改怪：{monster_id: {attr: value}}。special 存为 list（见 mechanics §M.1/M.4）
     _enemy_overrides: dict = field(default_factory=dict)
+    # 存档键盘快捷键绑定 {keyCode_int: item_id}（数据驱动，来自 data/<塔>/replay_keybindings.json）。
+    # KEY:<keyCode> token 按此表派发为使用对应道具；无绑定则 no-op。绝不在 sim 硬编码键→道具。
+    _key_bindings: dict = field(default_factory=dict)
 
     @property
     def floor(self) -> FloorState:
@@ -185,6 +191,8 @@ def _copy_state(state: GameState) -> GameState:
             _id_to_tile_full=f._id_to_tile_full,
             _monster_footprints=f._monster_footprints,
             _tile_to_id=f._tile_to_id,
+            _can_break_tiles=f._can_break_tiles,
+            is_hide=f.is_hide,
         )
     return GameState(
         hero=new_hero,
@@ -197,6 +205,7 @@ def _copy_state(state: GameState) -> GameState:
         _common_events=state._common_events,
         _merchants=state._merchants,
         _enemy_overrides={k: dict(v) for k, v in state._enemy_overrides.items()},
+        _key_bindings=state._key_bindings,
         dead=state.dead,
     )
 
@@ -260,6 +269,16 @@ def load_floor(path: Path) -> FloorState:
                 if tid not in tile_to_entity:
                     no_pass_tiles.add(tid)
 
+    # 可被地震卷轴破坏的 tile 集合（数据驱动，tiles.json 任意段 canBreak:true）。
+    # 引擎 earthquake 按 block.event.canBreak 过滤；本塔 = {1 yellowWall, 2 fakeWall}（3 fakeWall2=false）。
+    can_break_tiles: set = set()
+    for entries in tiles_db.values():
+        if not isinstance(entries, dict):
+            continue
+        for k, v in entries.items():
+            if isinstance(v, dict) and v.get("canBreak") is True:
+                can_break_tiles.add(int(k))
+
     # 大型怪 footprint（数据驱动）：怪 tile → 相对偏移列表。来自 monsters.json 的 footprint 字段。
     monster_footprints: dict = {}
     for tnum, mid in tile_to_enemy.items():
@@ -309,6 +328,7 @@ def load_floor(path: Path) -> FloorState:
         _id_to_tile_full=id_to_tile_full,
         _monster_footprints=monster_footprints,
         _tile_to_id=tile_to_id,
+        _can_break_tiles=can_break_tiles,
     )
 
 
@@ -437,6 +457,153 @@ def _use_center_fly(state: GameState) -> None:
         del hero.items["centerFly"]
 
 
+def _use_earthquake(state: GameState) -> None:
+    """地震卷轴 earthquake（cls=tools，可破坏一层楼的墙）。
+    引擎 useItemEffect：searchBlockWithFilter(block => !block.disable && block.event.canBreak)
+    对每个命中块 openDoor → 清当前层全图所有 canBreak 墙格（本塔 = tile 1 yellowWall / 2 fakeWall）。
+    canBreak 集合数据驱动来自 tiles.json（floor._can_break_tiles），不硬编码 tile 号。
+    canUseItemEffect=true（无前置）；tools 类使用成功消耗 1。来源 §L.6（items.js toString）。"""
+    hero, floor = state.hero, state.floor
+    if hero.items.get("earthquake", 0) <= 0:
+        return
+    breakable = floor._can_break_tiles
+    if breakable:
+        rows = len(floor.terrain)
+        cols = len(floor.terrain[0]) if rows else 0
+        for y in range(rows):
+            row = floor.terrain[y]
+            for x in range(cols):
+                if row[x] in breakable:
+                    row[x] = 0  # openDoor：地形格清为空地（可达性实时重算自动生效）
+    hero.items["earthquake"] -= 1
+    if hero.items["earthquake"] <= 0:
+        del hero.items["earthquake"]
+
+
+def _use_pickaxe(state: GameState) -> None:
+    """破墙镐 pickaxe（cls=tools）：破坏英雄【四方向相邻】、event.canBreak 的墙块。来源 §L（引擎 pickaxe.useItemEffect toString，2026-06-04）。
+    引擎逐条：core.utils.scan 四方向相邻 → 每个 canBreak 块 openDoor(async)。
+    与 earthquake 同 canBreak 口径(floor._can_break_tiles，本塔 = yellowWall/fakeWall)，区别仅范围：镐=相邻4格、震=整层。
+    无 afterBattle/金币/经验；canUseItemEffect=true（无前置）；tools 用后 -1。"""
+    hero, floor = state.hero, state.floor
+    if hero.items.get("pickaxe", 0) <= 0:
+        return
+    breakable = floor._can_break_tiles
+    rows = len(floor.terrain)
+    cols = len(floor.terrain[0]) if rows else 0
+    for dx, dy in ((0, -1), (-1, 0), (0, 1), (1, 0)):  # 上/左/下/右，与 core.utils.scan 同序
+        x, y = hero.x + dx, hero.y + dy
+        if 0 <= x < cols and 0 <= y < rows and floor.terrain[y][x] in breakable:
+            floor.terrain[y][x] = 0  # openDoor：破墙→空地（可达性实时重算自动生效）
+    hero.items["pickaxe"] -= 1
+    if hero.items["pickaxe"] <= 0:
+        del hero.items["pickaxe"]
+
+
+def _use_floor_fly_item(state: GameState, item_id: str, step_dir: int) -> None:
+    """upFly(step_dir=+1)/downFly(step_dir=-1)：切到当前层 floorIds 下标 ±1 的楼层。
+    与 fly 魔杖（_execute_floor_fly）不同：
+      - 落点 = 当前英雄坐标(x,y)，【不】使用目标层 up/downFloor 字段；
+      - 【不】检查 canFlyTo/canFlyFrom/hasVisitedFloor → 可进入隐藏层(如 MT44)；
+      - 硬编码限制：upFly index>=49 拒绝、downFly index<1 拒绝；
+      - canUseItemEffect：目标层该坐标须为空(getBlockId==null = 无地形块且无实体)。
+    校验不过则整体 no-op(不切层、不消耗)。成功消耗 1。来源 §I.7（引擎 toString）。"""
+    hero = state.hero
+    if hero.items.get(item_id, 0) <= 0:
+        return
+    idx = state.floor_ids.index(state.current_floor)
+    if step_dir > 0 and idx >= 49:   # upFly 硬顶
+        return
+    if step_dir < 0 and idx < 1:     # downFly 硬底
+        return
+    tgt_idx = idx + step_dir
+    if not (0 <= tgt_idx < len(state.floor_ids)):
+        return
+    target_id = state.floor_ids[tgt_idx]
+    if not _load_floor_if_needed(state, target_id):
+        return
+    target = state.floors[target_id]
+    x, y = hero.x, hero.y
+    rows = len(target.terrain)
+    cols = len(target.terrain[0]) if rows else 0
+    if not (0 <= x < cols and 0 <= y < rows):
+        return
+    if target.terrain[y][x] != 0 or target.entities[y][x] != 0:
+        return  # 目标格非空（getBlockId!=null）→ 拒绝
+    state.current_floor = target_id
+    state.visited_floors.add(target_id)
+    hero.items[item_id] -= 1
+    if hero.items[item_id] <= 0:
+        del hero.items[item_id]
+
+
+def _use_bomb(state: GameState) -> None:
+    """炸弹(tile49, cls=tools)：炸掉英雄四方向相邻、hp<500 的敌人。来源 §I.7（引擎 bomb.useItemEffect toString）。
+    引擎逐条：
+      - 范围：core.utils.scan = 上/左/下/右 四个【相邻】格（非 8 格）。
+      - 可炸条件 canBomb：该格 block.event.trigger=='battle' 且 cls 以 'enemy' 开头，
+        且 getEnemyValue(enemy,'hp',x,y) < 500（严格小于）。hp>=500(boss级)跳过该格。
+      - 不可炸格逐个 return 跳过，不影响其余；canUseItemEffect 恒 true（无目标也消耗）。
+      - 奖励：累加 money(金币 += getEnemyInfo.money)；无经验、引擎无 kill 计数概念。
+      - 移除→触发：先 removeBlockByIndexes 批量移除，再 insertAction(todo) 统一跑每个被炸怪的
+        floor.afterBattle[x,y]（+ enemy.afterBattle）。与正常战死【同一 afterBattle 路径】——
+        这是 MT44 双 redGuard 炸死后 (6,8) openDoor 机关的触发命门。
+      - 消耗：cls=tools → 用后 -1（_afterUseItem）。
+    （注：enemy.afterBattle 本塔 redGuard 为空，sim 仅复刻 floor.afterBattle，与 _fight_monster 一致。）"""
+    hero = state.hero
+    if hero.items.get("bomb", 0) <= 0:
+        return
+    floor = state.floor
+    rows = len(floor.entities)
+    cols = len(floor.entities[0]) if rows else 0
+    scan = [(0, -1), (-1, 0), (0, 1), (1, 0)]  # 上/左/下/右，与 core.utils.scan 同序
+    kills = []  # [(x, y, monster_id)] 被炸怪，按 scan 顺序
+    for dx, dy in scan:
+        x, y = hero.x + dx, hero.y + dy
+        if not (0 <= x < cols and 0 <= y < rows):
+            continue
+        monster_id = floor._tile_to_enemy.get(floor.entities[y][x])
+        if monster_id is None:
+            continue  # 非敌人格（地形/道具/门）跳过
+        if _build_monster(state, monster_id).hp >= 500:
+            continue  # boss级 hp>=500，炸不死，跳过该格
+        kills.append((x, y, monster_id))
+
+    # 先批量移除并结算金币（引擎 removeBlockByIndexes + money），再统一触发 afterBattle
+    for x, y, monster_id in kills:
+        floor.entities[y][x] = 0
+        hero.gold += floor._monsters_db[monster_id].get("gold", 0)
+    for x, y, monster_id in kills:
+        loc_key = f"{x},{y}"
+        if loc_key in floor.after_battle and loc_key not in floor._done_after_battle:
+            floor._done_after_battle.add(loc_key)
+            _execute_event_list(state, floor.after_battle[loc_key], x, y)
+
+    hero.items["bomb"] -= 1  # cls=tools 用后 -1（无目标也消耗，canUseItemEffect 恒 true）
+    if hero.items["bomb"] <= 0:
+        del hero.items["bomb"]
+
+
+def _use_item_by_id(state: GameState, item_id: str | None) -> None:
+    """按道具 id 派发使用效果（ITEM:<tile> 与 KEY:<keyCode> 快捷键共用）。
+    未建模道具暂为 no-op。使用后统一检查 autoEvent。"""
+    if item_id == "snow":
+        _use_snow(state)
+    elif item_id == "centerFly":
+        _use_center_fly(state)
+    elif item_id == "earthquake":
+        _use_earthquake(state)
+    elif item_id == "upFly":
+        _use_floor_fly_item(state, "upFly", +1)
+    elif item_id == "downFly":
+        _use_floor_fly_item(state, "downFly", -1)
+    elif item_id == "bomb":
+        _use_bomb(state)
+    elif item_id == "pickaxe":
+        _use_pickaxe(state)
+    _check_auto_events(state)
+
+
 def step(state: GameState, action: str) -> GameState:
     """Pure function: apply one action token to state, return new state.
 
@@ -475,12 +642,16 @@ def _step_impl(state: GameState, action: str) -> GameState:
     # 道具使用（ITEM:n，n=道具 tile）。按道具 id 派发；未建模道具暂为 no-op。
     if action.startswith("ITEM:"):
         tile = int(action.split(":", 1)[1])
-        item_id = state.floor._tile_to_item.get(tile)
-        if item_id == "snow":
-            _use_snow(state)
-        elif item_id == "centerFly":
-            _use_center_fly(state)
-        _check_auto_events(state)
+        _use_item_by_id(state, state.floor._tile_to_item.get(tile))
+        return state
+
+    # 键盘快捷键（KEY:keyCode，引擎 key:<n>）：按存档绑定表派发为使用某道具。
+    # 绑定来自 state._key_bindings（数据驱动）；无绑定则 no-op。绝不在此硬编码键→道具。
+    if action.startswith("KEY:"):
+        keycode = int(action.split(":", 1)[1])
+        item_id = state._key_bindings.get(keycode)
+        if item_id is not None:
+            _use_item_by_id(state, item_id)
         return state
 
     floor = state.floor
