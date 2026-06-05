@@ -7,9 +7,11 @@
 
 真值来源（玩家在真实引擎逐点实测，金标准）：
   - 原 17：tests/test_checkpoints.py GROUND_TRUTH（token≤2000，无坐标）。
+  - 1：extract/verify_tok2400.py（token2400，带坐标）。
   - 3：extract/verify_tok29xx.py（token2501/2804/2965，带坐标）。
-  - 5：玩家本轮新给（token3212/3371/3704/4012/4141，带坐标）——【落盘于此文件】，
-       此前仅存在于对话，按 CLAUDE.md「确认过的数值立即落盘」要求持久化。
+  - 5：玩家给（token3212/3371/3704/4012/4141，带坐标）。
+  - 6：终局段第一批（token4222/4350/4417/4504/4528/4582，带坐标）。
+  后两批【落盘于此文件】，按 CLAUDE.md「确认过的数值立即落盘」要求持久化。
 """
 import json
 import sys
@@ -56,12 +58,20 @@ CHECKPOINTS = [
     ck(2501, 'MT32', 143, 102, 64, yk=5, x=6,  y=10),
     ck(2804, 'MT33', 854, 112, 68, yk=3, x=7,  y=11),
     ck(2965, 'MT33', 6,   154, 70, yk=2, x=8,  y=3),
-    # 5（玩家本轮新给，落盘）
+    # 5（玩家给，落盘）
     ck(3212, 'MT2',  906, 154, 70,  yk=2, bk=1,       x=1, y=10),
     ck(3371, 'MT32', 606, 158, 70,  yk=3,             x=1, y=4),
     ck(3704, 'MT38', 486, 162, 74,  yk=4, bk=1, rk=1, x=2, y=1),
     ck(4012, 'MT40', 870, 166, 122, yk=1,             x=3, y=11),
     ck(4141, 'MT41', 262, 182, 134, yk=7,             x=6, y=2),
+    # 6（终局段第一批，玩家 2026-06-04 给，落盘）。DEF 暴涨 134→204→304→309（祭坛MT46/盾，对齐时核）。
+    # token4582 玩家标 "MT44?"（楼层存疑），暂按 MT44 落盘；若 sim 分歧由 FAIL 工作流裁定。
+    ck(4222, 'MT32', 1635, 182, 134, yk=2,             x=8,  y=8),
+    ck(4350, 'MT47', 1479, 186, 138, yk=2, bk=1,       x=10, y=10),
+    ck(4417, 'MT37', 1479, 202, 154, yk=11, bk=2, rk=1, x=2, y=4),
+    ck(4504, 'MT43', 123,  202, 204, yk=5, bk=2,       x=9,  y=4),
+    ck(4528, 'MT44', 623,  202, 304, yk=5, bk=2,       x=6,  y=5),
+    ck(4582, 'MT44', 4723, 202, 309, yk=5, bk=2,       x=11, y=2),
 ]
 MAXTOK = max(c['idx'] for c in CHECKPOINTS)
 
@@ -212,7 +222,7 @@ def main():
     # 首个 FAIL → 写 ledger（窗口=上一 PASS 检查点→该 FAIL）
     first_fail_i = next((i for i, (_, e, _, _) in enumerate(results) if e), None)
     if first_fail_i is None:
-        print('\n✅ 全部 25 个检查点 PASS。')
+        print(f'\n✅ 全部 {len(results)} 个检查点 PASS。')
         sys.exit(0)
 
     fc, ferrs, fsim, ftruth = results[first_fail_i]

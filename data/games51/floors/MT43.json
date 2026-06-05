@@ -1,0 +1,240 @@
+{
+  "_comment": "来源: core.floors['MT43'] (live engine, Playwright 提取)。events 存原始 h5mota 脚本。",
+  "floorId": "MT43",
+  "title": "魔塔 第43层",
+  "width": 13,
+  "height": 13,
+  "ratio": 5,
+  "bgm": "section5.mp3",
+  "downFloor": [1, 2],
+  "upFloor": [1, 10],
+  "_map_note": "map[y][x]，0=地板，1=墙。tile ID 含义见 tiles.json。",
+  "map": [
+    [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+    [1, 88, 0, 81, 0, 204, 0, 81, 81, 246, 0, 0, 1],
+    [1, 0, 0, 1, 1, 1, 0, 1, 330, 0, 330, 0, 1],
+    [1, 0, 0, 81, 0, 1, 228, 1, 0, 0, 1, 0, 1],
+    [1, 82, 1, 1, 220, 1, 0, 228, 0, 42, 1, 0, 1],
+    [1, 0, 204, 0, 0, 1, 1, 1, 1, 1, 1, 81, 1],
+    [1, 0, 1, 81, 1, 1, 32, 0, 81, 0, 0, 0, 1],
+    [1, 0, 1, 0, 0, 204, 0, 0, 1, 219, 0, 31, 1],
+    [1, 81, 1, 1, 1, 1, 1, 1, 1, 0, 21, 0, 1],
+    [1, 0, 207, 1, 32, 0, 228, 0, 1, 1, 1, 81, 1],
+    [1, 0, 0, 1, 32, 1, 1, 0, 81, 0, 207, 0, 1],
+    [1, 87, 0, 1, 32, 0, 82, 0, 1, 0, 0, 22, 1],
+    [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+  ],
+  "_map_entities": {
+    "_comment": "从 map 推导的实体位置，模拟器从 map+tiles.json 动态解析。",
+    "monsters": {
+      "slimelord(204)": [
+        "(5,1)",
+        "(2,5)",
+        "(5,7)"
+      ],
+      "whiteKing(246)": [
+        "(9,1)"
+      ],
+      "darkKnight(228)": [
+        "(6,3)",
+        "(7,4)",
+        "(6,9)"
+      ],
+      "redWizard(220)": [
+        "(4,4)"
+      ],
+      "brownWizard(219)": [
+        "(9,7)"
+      ],
+      "redBat(207)": [
+        "(2,9)",
+        "(10,10)"
+      ]
+    },
+    "items": {
+      "shield4(42)": [
+        "(9,4)"
+      ],
+      "bluePotion(32)": [
+        "(6,6)",
+        "(4,9)",
+        "(4,10)",
+        "(4,11)"
+      ],
+      "redPotion(31)": [
+        "(11,7)"
+      ],
+      "yellowKey(21)": [
+        "(10,8)"
+      ],
+      "blueKey(22)": [
+        "(11,11)"
+      ]
+    },
+    "doors": {
+      "yellowDoor(81)": [
+        "(3,1)",
+        "(7,1)",
+        "(8,1)",
+        "(3,3)",
+        "(11,5)",
+        "(3,6)",
+        "(8,6)",
+        "(1,8)",
+        "(11,9)",
+        "(8,10)"
+      ],
+      "blueDoor(82)": [
+        "(1,4)",
+        "(6,11)"
+      ]
+    },
+    "fakes": {
+      "unbreakableWall(330)": [
+        "(8,2)",
+        "(10,2)"
+      ]
+    },
+    "stairs_terrain": {
+      "downFloor(88)": [
+        "(1,1)"
+      ],
+      "upFloor(87)": [
+        "(1,11)"
+      ]
+    }
+  },
+  "changeFloor": {
+    "1,11": {
+      "floorId": ":next",
+      "stair": "downFloor"
+    },
+    "1,1": {
+      "floorId": ":before",
+      "stair": "upFloor",
+      "time": 0
+    }
+  },
+  "events": {
+    "8,1": {
+      "trigger": "action",
+      "enable": true,
+      "noPass": null,
+      "displayDamage": true,
+      "opacity": 1,
+      "filter": {
+        "blur": 0,
+        "hue": 0,
+        "grayscale": 0,
+        "invert": false,
+        "shadow": 0
+      },
+      "data": [
+        {
+          "type": "if",
+          "condition": "(blockId:8,1==='yellowDoor')",
+          "true": [
+            {
+              "type": "if",
+              "condition": "(item:yellowKey>=1)",
+              "true": [
+                {
+                  "type": "openDoor",
+                  "loc": [8, 1],
+                  "needKey": true
+                },
+                {
+                  "type": "setBlock",
+                  "number": "0",
+                  "loc": [
+                    [8, 1]
+                  ]
+                },
+                {
+                  "type": "show"
+                }
+              ],
+              "false": [
+                {
+                  "type": "tip",
+                  "text": "你没有黄钥匙！！"
+                }
+              ]
+            }
+          ],
+          "false": [
+            {
+              "type": "if",
+              "condition": "(blockId:9,1==='whiteKing')",
+              "true": [
+                {
+                  "type": "setBlock",
+                  "number": "yellowWall",
+                  "loc": [
+                    [8, 2],
+                    [10, 2]
+                  ]
+                },
+                {
+                  "type": "playSound",
+                  "name": "开关门"
+                },
+                {
+                  "type": "closeDoor",
+                  "id": "yellowWall",
+                  "loc": [7, 1],
+                  "async": true
+                },
+                {
+                  "type": "move",
+                  "loc": [9, 1],
+                  "time": 200,
+                  "keep": true,
+                  "steps": [
+                    "right:2"
+                  ]
+                },
+                {
+                  "type": "waitAsync"
+                },
+                {
+                  "type": "playSound",
+                  "name": "开关门"
+                },
+                {
+                  "type": "closeDoor",
+                  "id": "yellowWall",
+                  "loc": [10, 1]
+                },
+                {
+                  "type": "hide",
+                  "remove": true,
+                  "time": 0
+                }
+              ],
+              "false": []
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "firstArrive": [],
+  "eachArrive": [],
+  "afterGetItem": {},
+  "afterBattle": {
+    "9,1": [
+      {
+        "type": "setBlock",
+        "number": "yellowWall",
+        "loc": [
+          [8, 2],
+          [10, 2]
+        ]
+      }
+    ]
+  },
+  "autoEvent": {},
+  "afterOpenDoor": {},
+  "cannotMove": {}
+}

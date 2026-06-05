@@ -1,0 +1,115 @@
+{
+  "_comment": "来源: core.floors['MT44'] (live engine, Playwright 提取)。events 存原始 h5mota 脚本。",
+  "floorId": "MT44",
+  "title": "魔塔 第44层",
+  "width": 13,
+  "height": 13,
+  "ratio": 5,
+  "bgm": "44f.mp3",
+  "downFloor": null,
+  "upFloor": null,
+  "_isHide_note": "来源: live engine core.status.maps['MT44'].isHide=true (canFlyTo=false,canFlyFrom=true)。隐藏层：楼梯 :next/:before 解析跳过本层，只能用 upFly/downFly 进入。MT43↔MT45 楼梯直连。",
+  "isHide": true,
+  "_map_note": "map[y][x]，0=地板，1=墙。tile ID 含义见 tiles.json。",
+  "map": [
+    [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+    [1, 87, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+    [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+    [1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1],
+    [1, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 1],
+    [1, 0, 0, 0, 1, 1, 31, 1, 1, 0, 0, 0, 1],
+    [1, 0, 0, 1, 1, 31, 44, 31, 1, 1, 0, 0, 1],
+    [1, 0, 0, 0, 1, 1, 31, 1, 1, 0, 0, 0, 1],
+    [1, 0, 0, 0, 0, 1, 85, 1, 0, 0, 0, 0, 1],
+    [1, 0, 0, 0, 0, 223, 0, 223, 0, 0, 0, 0, 1],
+    [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+    [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+    [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+  ],
+  "_map_entities": {
+    "_comment": "从 map 推导的实体位置，模拟器从 map+tiles.json 动态解析。",
+    "monsters": {
+      "redGuard(223)": [
+        "(5,9)",
+        "(7,9)"
+      ]
+    },
+    "items": {
+      "redPotion(31)": [
+        "(6,5)",
+        "(5,6)",
+        "(7,6)",
+        "(6,7)"
+      ],
+      "shield5(44)": [
+        "(6,6)"
+      ]
+    },
+    "doors": {
+      "specialDoor(85)": [
+        "(6,8)"
+      ]
+    },
+    "stairs_terrain": {
+      "upFloor(87)": [
+        "(1,1)"
+      ]
+    }
+  },
+  "changeFloor": {
+    "1,1": {
+      "floorId": ":next",
+      "stair": "downFloor",
+      "time": 0
+    }
+  },
+  "events": {},
+  "firstArrive": [],
+  "eachArrive": [],
+  "afterGetItem": {},
+  "afterBattle": {
+    "5,9": [
+      {
+        "type": "if",
+        "condition": "flag:44",
+        "true": [
+          {
+            "type": "openDoor",
+            "loc": [6, 8]
+          }
+        ],
+        "false": [
+          {
+            "type": "setValue",
+            "operator": "+=",
+            "name": "flag:44",
+            "value": "1"
+          }
+        ]
+      }
+    ],
+    "7,9": [
+      {
+        "type": "if",
+        "condition": "flag:44",
+        "true": [
+          {
+            "type": "openDoor",
+            "loc": [6, 8]
+          }
+        ],
+        "false": [
+          {
+            "type": "setValue",
+            "operator": "+=",
+            "name": "flag:44",
+            "value": "1"
+          }
+        ]
+      }
+    ]
+  },
+  "autoEvent": {},
+  "afterOpenDoor": {},
+  "cannotMove": {}
+}

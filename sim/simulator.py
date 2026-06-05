@@ -85,6 +85,9 @@ class FloorState:
     # 落点坐标（fly魔杖/楼梯飞入此层时的英雄位置）
     down_floor: list | None = None   # [x, y]，从低层飞来时落点
     up_floor: list | None = None     # [x, y]，从高层飞来时落点
+    # 隐藏层标记（来自 JSON isHide）：楼梯 :next/:before 解析对隐藏层透明（跳过），
+    # 隐藏层只能用 upFly/downFly 进入。本塔仅 MT44。见 mechanics §I.5。
+    is_hide: bool = False
     # firstArrive / afterGetItem（来自 JSON）
     first_arrive: list = field(default_factory=list)
     after_get_item: dict = field(default_factory=dict)
@@ -298,6 +301,7 @@ def load_floor(path: Path) -> FloorState:
         _done_after_battle=set(),
         down_floor=data.get("downFloor"),
         up_floor=data.get("upFloor"),
+        is_hide=data.get("isHide", False),
         first_arrive=data.get("firstArrive", []),
         after_get_item=data.get("afterGetItem", {}),
         _no_pass_tiles=no_pass_tiles,
@@ -325,11 +329,19 @@ def _resolve_floor_id(state: GameState, expr: str) -> str:
     if not expr.startswith(":"):
         return expr
     idx = state.floor_ids.index(state.current_floor)
-    if expr == ":next":
-        return state.floor_ids[idx + 1]
-    if expr == ":before":
-        return state.floor_ids[idx - 1]
-    return expr
+    step = 1 if expr == ":next" else -1 if expr == ":before" else 0
+    if step == 0:
+        return expr
+    # 跳过隐藏层（isHide=true）：引擎对楼梯序列中的隐藏层透明（同 floorTofloor 递归跳过），
+    # 隐藏层只能用 upFly/downFly 进入。本塔表现为 MT43↔MT45 楼梯直连（跳过 MT44）。见 §I.5。
+    i = idx + step
+    while 0 <= i < len(state.floor_ids):
+        fid = state.floor_ids[i]
+        if _load_floor_if_needed(state, fid) and state.floors[fid].is_hide:
+            i += step
+            continue
+        return fid
+    return state.floor_ids[idx + step]  # 越界兜底（理论不触发）
 
 
 def _execute_floor_fly(state: GameState, target_floor_id: str) -> None:
@@ -544,6 +556,137 @@ def _in_alive_monster_footprint(floor: FloorState, nx: int, ny: int) -> bool:
     return False
 
 
+# ─── 区域/地形伤（领域15 / 夹击16 / 阻击18）──────────────────────────────────
+# 数据驱动：special 编号 + value/range/zoneSquare 全来自 monsters.json，sim 不认具体怪。
+# 公式来源 mechanics §C.2/C.3/C.4（引擎 checkBlock）+ 阻击后退为玩家实测。
+# 结算时机：英雄【走到】某格后立即结算该格所受区域伤（踩格瞬间，per-arrival）。
+# 叠加：领域+阻击各自 value 累加(acc)；夹击在 acc 之上对剩余 HP 减半 floor((hp-acc)/2)。
+# 免疫：flag:魔法免疫 全免；或各自 flag:no_zone / no_repulse / no_betweenAttack。
+# 致死走 §M.8：hp≤0 置 state.dead 冻结，不再后退怪/触发本格事件。
+_SP_ZONE = 15       # 领域
+_SP_BETWEEN = 16    # 夹击
+_SP_REPULSE = 18    # 阻击
+
+
+def _enemy_special_set(state: GameState, mid: str) -> set:
+    """怪的 special 集合（含 setEnemy 覆盖，与 _build_monster 口径一致）。"""
+    ov = state._enemy_overrides.get(mid, {})
+    sp = ov.get("special", state.floor._monsters_db.get(mid, {}).get("special", []))
+    if isinstance(sp, int):
+        sp = [sp] if sp else []
+    return set(sp)
+
+
+def _live_zone_monsters(state: GameState) -> list:
+    """存活区域怪：entities 层有怪 tile 且 special 含 15/16/18。
+    返回 [(mx,my,mid,sp_set,value,rng,zsq)]。"""
+    floor = state.floor
+    out = []
+    for my, row in enumerate(floor.entities):
+        for mx, tile in enumerate(row):
+            mid = floor._tile_to_enemy.get(tile)
+            if mid is None:
+                continue
+            sp = _enemy_special_set(state, mid)
+            if sp & {_SP_ZONE, _SP_BETWEEN, _SP_REPULSE}:
+                m = floor._monsters_db.get(mid, {})
+                out.append((mx, my, mid, sp, m.get("value", 0),
+                            m.get("range", 1) or 1, bool(m.get("zoneSquare", False))))
+    return out
+
+
+def _in_zone_range(x, y, mx, my, rng, square) -> bool:
+    """(x,y) 在 (mx,my) 的领域内（不含怪本格）。square=方形(切比雪夫)，否则菱形(曼哈顿)。"""
+    if (x, y) == (mx, my):
+        return False
+    ddx, ddy = abs(x - mx), abs(y - my)
+    return max(ddx, ddy) <= rng if square else (ddx + ddy) <= rng
+
+
+def _is_adjacent(x, y, mx, my, square) -> bool:
+    """阻击影响格：正交相邻(距离1)；square 则含对角(8 相邻)。"""
+    ddx, ddy = abs(x - mx), abs(y - my)
+    return max(ddx, ddy) == 1 if square else (ddx + ddy) == 1
+
+
+def _between_same_special16(state: GameState, x, y) -> bool:
+    """(x,y) 被两个【同 id】special16 怪横向或纵向夹住（§C.4）。"""
+    floor = state.floor
+    ent = floor.entities
+    H = len(ent)
+    W = len(ent[0]) if H else 0
+
+    def s16_id(cx, cy):
+        if not (0 <= cy < H and 0 <= cx < W):
+            return None
+        mid = floor._tile_to_enemy.get(ent[cy][cx])
+        if mid is None:
+            return None
+        return mid if _SP_BETWEEN in _enemy_special_set(state, mid) else None
+
+    for (ax, ay), (bx, by) in (((x - 1, y), (x + 1, y)), ((x, y - 1), (x, y + 1))):
+        a = s16_id(ax, ay)
+        if a is not None and a == s16_id(bx, by):
+            return True
+    return False
+
+
+def _repulse_monster(state: GameState, hx, hy, mx, my) -> None:
+    """阻击怪后退一格：远离勇者方向(怪-勇者 单位向量延伸)。
+    退路被墙/门/楼梯/任何实体/越界挡则不退（玩家实测）。games51 无 special18 怪，此分支休眠。"""
+    floor = state.floor
+    tx, ty = mx + (mx - hx), my + (my - hy)
+    rows = len(floor.terrain)
+    cols = len(floor.terrain[0]) if rows else 0
+    if not (0 <= ty < rows and 0 <= tx < cols):
+        return
+    t = floor.terrain[ty][tx]
+    if t in WALL_TILES or t in floor._no_pass_tiles:
+        return
+    if t in DOOR_KEY_MAP or t == SPECIAL_DOOR or t in AUTO_OPEN_TILES:
+        return
+    if f"{tx},{ty}" in floor.change_floor:          # 楼梯
+        return
+    if floor.entities[ty][tx] != 0:                 # 道具/怪/NPC 占位
+        return
+    floor.entities[ty][tx] = floor.entities[my][mx]
+    floor.entities[my][mx] = 0
+
+
+def _apply_zone_damage(state: GameState, x: int, y: int) -> None:
+    """英雄走到 (x,y) 后结算区域伤（§C.2/C.3/C.4 + 实测）。致死置 dead（§M.8）。"""
+    hero = state.hero
+    fl = hero.flags
+    if fl.get("魔法免疫"):
+        return
+    zms = _live_zone_monsters(state)
+    if not zms:
+        return
+
+    acc = 0
+    repulse_hits = []
+    for (mx, my, mid, sp, value, rng, zsq) in zms:
+        if _SP_ZONE in sp and not fl.get("no_zone") and _in_zone_range(x, y, mx, my, rng, zsq):
+            acc += value
+        if _SP_REPULSE in sp and not fl.get("no_repulse") and _is_adjacent(x, y, mx, my, zsq):
+            acc += value
+            repulse_hits.append((mx, my))
+
+    between = 0
+    if not fl.get("no_betweenAttack") and hero.hp > acc and _between_same_special16(state, x, y):
+        between = (hero.hp - acc) // 2   # floor；betweenAttackMax=false
+
+    total = acc + between
+    if total > 0:
+        hero.hp -= total
+        if hero.hp <= 0:
+            state.dead = True
+            return   # 死亡冻结：不再后退怪/触发本格事件（§M.8）
+
+    for (mx, my) in repulse_hits:
+        _repulse_monster(state, x, y, mx, my)
+
+
 def _process_move(state: GameState, direction: str) -> None:
     hero = state.hero
     floor = state.floor
@@ -572,6 +715,7 @@ def _process_move(state: GameState, direction: str) -> None:
     if e_tile in floor._tile_to_item:
         _pickup_item(state, nx, ny)
         hero.x, hero.y = nx, ny
+        _apply_zone_damage(state, nx, ny)
         _fire_events(state, nx, ny)
         return
 
@@ -580,6 +724,7 @@ def _process_move(state: GameState, direction: str) -> None:
         # 事件已禁用（enable: false）→ hero 直接通过（如 MT1 作者NPC）
         if isinstance(ev, dict) and ev.get("enable") is False:
             hero.x, hero.y = nx, ny
+            _apply_zone_damage(state, nx, ny)
             return
         # 有激活事件（如商店/小偷列表事件）→ NPC 为 noPass，触发互动后 hero 不移入，需再按一次走入
         if ev is not None:
@@ -624,6 +769,7 @@ def _process_move(state: GameState, direction: str) -> None:
         return
 
     hero.x, hero.y = nx, ny
+    _apply_zone_damage(state, nx, ny)
     _fire_events(state, nx, ny)
 
 
@@ -749,6 +895,9 @@ def _fight_monster(state: GameState, mx: int, my: int) -> None:
     hero.x, hero.y = mx, my
 
     _apply_post_combat_effects(hero, result)
+    _apply_zone_damage(state, mx, my)
+    if state.dead:
+        return   # 战后落格区域伤致死 → 冻结，不触发 afterBattle（§M.8）
 
     loc_key = f"{mx},{my}"
     if loc_key in floor.after_battle and loc_key not in floor._done_after_battle:
@@ -830,6 +979,8 @@ def _apply_item_effect(hero: HeroState, effect: dict, ratio: int) -> None:
 # ─── Event firing ────────────────────────────────────────────────────────────
 
 def _fire_events(state: GameState, x: int, y: int) -> None:
+    if state.dead:        # 区域伤/事件致死 → 冻结，不触发本格事件（§M.8）
+        return
     floor = state.floor
     loc_key = f"{x},{y}"
 

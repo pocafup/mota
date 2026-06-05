@@ -104,7 +104,7 @@ def gen_one(fid, raw, all_raw):
         "floorId": raw["floorId"], "title": raw["title"],
         "width": raw["width"], "height": raw["height"],
         "ratio": raw["ratio"], "bgm": raw["bgm"],
-        "downFloor": raw["downFloor"], "upFloor": raw["upFloor"],
+        "downFloor": raw.get("downFloor"), "upFloor": raw.get("upFloor"),
         "_map_note": "map[y][x]，0=地板，1=墙。tile ID 含义见 tiles.json。",
         "map": raw["map"], "_map_entities": entities,
         "changeFloor": raw.get("changeFloor", {}), "events": raw.get("events", {}),
@@ -135,7 +135,7 @@ def report(fid, raw, errs, unknown, entities, all_raw):
         for x, y, c in unknown: print(f"      ({x},{y}) = tile {c}")
 
     print(f"  —— 楼梯连通 ——")
-    print(f"  downFloor(落点字段)={raw['downFloor']}  upFloor(落点字段)={raw['upFloor']}")
+    print(f"  downFloor(落点字段)={raw.get('downFloor')}  upFloor(落点字段)={raw.get('upFloor')}")
     for k, cf in raw.get("changeFloor", {}).items():
         tgt = resolve_floor(fid, cf["floorId"])
         land = landing_coord(tgt, cf["stair"], all_raw)

@@ -73,7 +73,13 @@
       {"floor": "MT7",  "pos": "6,1",   "price": 50,   "give": {"yellowKey": 5}},
       {"floor": "MT12", "pos": "1,1",   "price": 800,  "give": {"redKey": 1}},
       {"floor": "MT15", "pos": "11,11", "price": 200,  "give": {"blueKey": 1}},
-      {"_note": "以下楼层在 '商人' commonEvent 的 switch(楼层号) 中声明，但楼层尚未提取(当前仅到 MT20)，待提取时落盘并验证：MT31 price1000 give{yellowKey:4,blueKey:1} / MT38 price200 give{yellowKey:3} / MT39 price2000 give{blueKey:3} / MT45 price1000 give{hp:2000} / MT47 price4000 give{earthquake:1}。default: '没有本层商人信息'(无交易)。",
+      {"floor": "MT31", "pos": "1,11",  "price": 1000, "give": {"yellowKey": 4, "blueKey": 1},
+       "_note": "trader(122)@(1,11) 已提取(MT31.json)坐实；MT31.events={} 空，交易体在 '商人' commonEvent case31。玩家 2026-06-04 实测确认 4黄+1蓝/1000金（tok4332 撞→tok4333 CHOICE:0 成交，前两次 CHOICE:1 不买商人留存）。多件 give：_handle_trader 循环逐件 giveItem。"},
+      {"floor": "MT45", "pos": "9,3",   "price": 1000, "give": {"hp": 2000},
+       "_note": "trader(122)@(9,3) 已提取(MT45.json)坐实；MT45.events={} 空，交易体在 '商人' commonEvent case45。give hp=状态加成(status:hp+=2000)，非道具。"},
+      {"floor": "MT47", "pos": "5,2",   "price": 4000, "give": {"earthquake": 1},
+       "_note": "trader(122)@(5,2) 已提取(MT47.json)坐实；MT47.events={} 空，交易体在 '商人' commonEvent case47。"},
+      {"_note": "以下楼层在 '商人' commonEvent switch(楼层号) 中声明，位置待对应楼层提取后落盘验证：MT38 price200 give{yellowKey:3} / MT39 price2000 give{blueKey:3}。default: '没有本层商人信息'(无交易)。MT31/MT45/MT47 已落盘(见上)。",
        "floor": null}
     ]
   }
