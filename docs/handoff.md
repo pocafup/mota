@@ -5,6 +5,18 @@
 
 ---
 
+## 🟢 solver 前置机制验证：神圣盾魔法免疫坐实（G5/G6/J13 解决）+ snow 持有守卫 + 单测——80 单测 + 46 检查点全绿（2026-06-05）
+
+> 玩家裁定"先不开始 solver，两个机制必须先坐实+验证（solver 会探索 route 外路线，否则必错）"。本段把神圣盾免疫与 snow 坐实落盘+单测，零回归。详见 `mechanics_51.md §C.8 / §K.2`、`memory/mechanics_status.md`。
+
+- **神圣盾 = 区域伤（魔法）免疫**（G5/G6/J13 解决）：神圣盾 = `shield5` = tile44，唯一在 **MT44(6,6)**（杀 (5,9)(7,9) 两 redGuard 开 specialDoor(6,8) 入中心拾）。引擎 itemEffect = `def+=100 + setFlag('魔法免疫',true)`；`flag:魔法免疫` 免疫**领域15/夹击16/阻击18/激光24/伏击27 全部区域伤**（updateCheckBlock 源码）。
+  - **本塔"地形伤"= 巫师领域/夹击**，神圣盾免之。**血网(lavaNet) 是另一套(护符 amulet)，本塔全图无 lavaNet、无 amulet → 空置**；lava(tile5) 是 noPass 障碍不扣血，由 snow 清。tiles.json tile5 旧误导注释已订正。
+  - **sim 早已就绪**（拾取 set_flags :1242 + 免疫 `_apply_zone_damage` 入口 :930），**无需改产品代码**。本 route token4527 拾盾（DEF 204→304）；**持盾后大量过区域伤格被 checkpoint 4582/4723/5833/6066… 重度隐性验证**（非"无真值"）。单测 `tests/test_holy_shield.py`（6 测）。
+- **snow 持有守卫**（玩家裁定必须，solver 正确性）：`_use_snow` 加 `if items['snow']<=0: return`（与 centerFly 同款）——**没拿到 snow 就用=no-op**。snow 只清**四正方向**相邻 lava（玩家实测确认不清对角），cls=constants 不消耗可重复。route snow 首入背包 tok5907(MT35 屠龙)、5 次使用均持有 → 守卫不破坏回放。单测 `tests/test_snow.py`（6 测）。
+- **solver 前置状态**：神圣盾/snow/floodfill 化简/死亡剪枝/区域伤/被动加成等**均就绪**；**唯一挂着的前置 = bomb×coin 交互**（见下一里程碑【下一阶段】§，solver 若用 bomb+coin 组合策略前必须回引擎 afterBattle 源码坐实）。
+
+---
+
 ## 🟢🎉 模拟器阶段完成：MT2 商人 3% 祝福 + MT49 削弱链/屠龙刀 + 圣水 switch 分支 + win 软终止——46/46 检查点全 PASS，token0→6353 通关全程逐 token 复现，终态 won=True HP=14382（2026-06-05，commit d026c80）
 
 ### 【里程碑：模拟器阶段完成】
@@ -28,7 +40,7 @@ solver 设计见 `docs/solver-design.md`。已积累的 solver 相关资产：
 - **死亡硬终止**（dead）= **剪枝**接口：探索"会死路线"时即时砍掉（普通战斗 damage≥hp 由 canBattle 拦截、永不致死；能致死的只有 force/事件/地形）。
 - **centerFly 绕后清场** = MT40 零伤打法范式（瞬移锚点先清红门上 13 格再踩触发格，全程零损）。
 - **被动加成**（非线性属性阈值来源之一）：coin（金币×2）、knife 屠龙刀（对 magicDragon ATK×2）、cross（对僵尸/吸血鬼 ATK×2）。
-- **⚠ bomb×coin 交互待源码坐实**：bomb 炸杀金币当前**不**乘 coin×2（走 removeBlock 非 `_enemy_gold`），引擎 afterBattle 源码未抓取——**solver 启动前必须确认**（mechanics §J）。
+- **⚠ bomb×coin 交互待源码坐实 = solver 前置最后一个挂着的待确认**：bomb 炸杀金币当前**不**乘 coin×2（走 removeBlock 非 `_enemy_gold`），引擎 afterBattle 源码未抓取——**solver 若要用 bomb+coin 组合策略，启动前必须回 `core.useBomb`/炸弹结算 afterBattle 源码坐实**（mechanics §J16）。神圣盾/snow 已于上方里程碑解决，此为前置清单仅剩项。
 - **N-b（真结局口径）不在求解范围**：按假结局(NE)对齐，通关 = 杀 MT50 boss 即终止。
 
 ---

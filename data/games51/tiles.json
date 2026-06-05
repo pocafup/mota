@@ -29,7 +29,7 @@
     "3":   {"id":"fakeWall2","keys":{},"canBreak":false,"_note":"假墙2，无需钥匙即可触碰开启（keys={}）。canBreak:false 来源 maps.js blocksInfo[3].canBreak=false：地震卷轴【不】清除它。"},
     "4":   {"id":"star","noPass":true,"_note":"星空装饰块。来源订正: 引擎 blocksInfo[4]={id:star,cls:animates}（extract/blocksInfo_full.json）、live engine getBlockByNumber(4) noPass=true。旧 tiles.json walls 段误标 4=airwall（id 错，noPass 凑巧同为 true）已删。仅 MT50 顶层铺底(中央5×5 boss竞技场以外全是 star，144 格)，常规移动按 noPass 拦截；centerFly 落点 getBlockId='star'≠airwall→不可落。MT1-49 不出现此 tile（订正零影响面）。"},
     "5":   {"id":"lava","noPass":true,
-            "_terrain_damage": "lavaDamage=100 HP/步，持有 amulet 免疫"},
+            "_note": "岩浆=noPass 障碍（踩不上去、【不】扣血），仅 MT13(80格)/MT26(19格)。由冰魔法 snow 清四正方向相邻 lava→空地（§K）。订正(2026-06-05 玩家确认)：旧 _terrain_damage 注释误导——lavaDamage=100/步+amulet 免疫是【血网 lavaNet】机制，本塔全图无 lavaNet 地形、无 amulet（updateCheckBlock 源码坐实），与 lava 无关。本塔唯一踩格扣血=巫师领域/夹击，由神圣盾 flag:魔法免疫 免疫（§C/§J13）。"},
     "81":  {"id":"yellowDoor","keys":{"yellowKey":1},"_note":"黄门"},
     "82":  {"id":"blueDoor","keys":{"blueKey":1},"_note":"蓝门"},
     "83":  {"id":"redDoor","keys":{"redKey":1},"_note":"红门"},

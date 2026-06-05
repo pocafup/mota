@@ -302,10 +302,19 @@ damage[整列每格] += enemy.value
 - **结算时机**：英雄**走到（per-arrival）**某格后立即结算该格所受区域伤。接入英雄"走入新格"的全部落点：普通走入 / 拾取后走入 / 禁用NPC通过 / **战斗后落怪格**（杀怪后站怪格，受相邻存活怪的区域伤）。`MOVE:`（moveDirectly 直跳）暂不沿途结算区域伤（仅 poison 按曼哈顿步数），待撞到再补。
 - **叠加顺序**：①领域(15)按 `菱形/方形 ≤range` 命中累加 `value`；②阻击(18)按 `正交相邻(距1)` 命中累加 `value` → 合为 `acc`；③夹击(16)在 `acc` 之上对剩余血减半 `floor((hp−acc)/2)`（`betweenAttackMax=false`，不取 min）。即最终 `hp ← ceil((hp−acc)/2)`（当被夹击时）。
 - **半血取整 = floor**（§C.4：`floor((hp−acc)/2)`）。
-- **免疫**：`flag:魔法免疫` 全免；或各机制 `flag:no_zone / no_repulse / no_betweenAttack`。**回放路线均未置这些 flag**，故区域伤全额生效。
+- **免疫**：`flag:魔法免疫` 全免；或各机制 `flag:no_zone / no_repulse / no_betweenAttack`。本路线 **token4527 拾神圣盾 shield5 置 `flag:魔法免疫=true`**（见 §C.8）→ 此后所有区域伤全免；**持盾前**（tok4527 前）经过的区域伤格全额生效。两段均被 46 检查点验证吻合。
 - **致死走 §M.8**：区域伤致 `hp≤0` → 置 `state.dead` 冻结，**不再后退怪、不触发本格事件**（`_fire_events` 入口加 dead 守卫）。
 - **games51 实际触发范围**：仅 **领域**（brownWizard 219 value100 / redWizard 220 value200，range1 菱形=正交4格）与 **夹击**（whiteKing 246），且只出现于 **MT41–MT49**。MT1–MT40 无任何区域怪 → 实现对前 40 层为 no-op（token4141 MT41 仍稳 262，证路线避开了 zone 格）。
-- **J 待确认（神圣盾免疫地形伤）**：玩家预告"神圣盾免疫地形伤害"——其对应 flag（是否即 `flag:魔法免疫` 或 `flag:no_zone/no_repulse/no_betweenAttack`，或独立护盾计数）**待源码坐实**，见 §J「J13」。当前未实现神圣盾免疫，对齐撞到再补。
+### C.8 神圣盾 = `flag:魔法免疫` → 区域伤全免（G5/G6/J13 已解决，玩家裁定 2026-06-05）
+
+> 坐实来源：引擎 items.js（itemEffect 字面量）+ updateCheckBlock 源码 + MT44.json + common_events.js。已实现+单测 `tests/test_holy_shield.py`（6 测全过），过 46 检查点零回归。
+
+- **道具**：神圣盾 = `shield5` = tile 44，唯一在 **MT44(6,6)**。MT44 是异空间隐藏层（`isHide`，靠 upFly/downFly 进）；拿法 = 杀 (5,9)(7,9) 两个 redGuard → 第二只 `afterBattle` `openDoor(6,8)` 开特殊门 → 进中心拾取（common_events.js 备忘录 case44/45 印证"神圣盾藏在异空间楼层"）。
+- **itemEffect（引擎原文）**：`hero.def += 100; setFlag('nowShield','shield5'); setFlag('魔法免疫', true)`。注：`equip.value.mdef=100` 仅装备模式给，**itemEffect 不加 mdef**（本塔按 itemEffect 拾取，故只 +def100，对齐 checkpoint 4528 DEF 204→304）。
+- **免疫范围（updateCheckBlock 源码）**：`flag:魔法免疫` 一律置 0 于 **领域15 / 夹击16 / 阻击18 / 激光24 / 伏击27** 全部区域伤。即神圣盾 = 区域伤（魔法攻击）全免。
+- **本塔"地形伤"澄清（重要）**：本塔唯一"踩格扣血"= 巫师领域/夹击，神圣盾正免之。**血网（lavaNet）是另一套**免疫（`hasItem('amulet')` 护符），**全塔无 lavaNet 地形、无 amulet → 该机制空置**。`lava`(tile5) 是 noPass 障碍（MT13/MT26），不扣血，由 snow 清除（§K）。tiles.json tile5 旧 `_terrain_damage` 注释（lavaDamage/amulet）已订正为误导残留。
+- **sim 实现（已就绪，数据驱动）**：拾取走 `_apply_item_effect` "stat" 分支 `set_flags`（simulator.py:1242）→ def+100 + 魔法免疫；免疫走 `_apply_zone_damage` 入口 `if fl.get("魔法免疫"): return`（simulator.py:930）。**无需为本机制改产品代码**。
+- **本路线覆盖度**：token4527（移动 U 进 MT44(6,6)）拾取。持盾后路线**大量**经过区域伤格（MT41/42/43/45/46/47/48/49 巫师领域+夹击，几十处），全因免疫吃 0 伤——被 checkpoint 4582/4723/5378/5833/6066… 全 PASS **重度隐性验证**（非"无真值"）。
 
 ---
 
@@ -1548,6 +1557,8 @@ function(itemId) {
 **结论：`constants` 类道具使用后不被扣数量，snow 可反复使用。**  
 （注意边缘情况：无相邻岩浆时 `useItemEffect` 调用 `core.addItem(itemId, 1)` 会多给 1 个；正常游玩不触发。）
 
+**持有守卫（玩家裁定 2026-06-05，已实现+单测）**：`_use_snow` 入口加 `if items['snow']<=0: return`——**背包无 snow 则使用=no-op、不清 lava**（与 centerFly 同款守卫，solver 正确性必须；否则 solver 可能在 MT35 屠龙获取前就"用 snow"）。验证：route snow 首次进背包 = token5907（MT35 屠龙后），全部 5 次 ITEM:54（tok5992/5994/5998/6001 MT13、tok6309 MT26）使用时 `items['snow']==1`，故守卫不破坏回放（46 检查点零回归）。单测 `tests/test_snow.py::test_snow_not_held_is_noop` 看守。snow 只清**四正方向**相邻 lava（不清对角，玩家 2026-06-05 实测确认）。
+
 ### K.3 获取途径（来源：`core.floors['MT35'].afterBattle['6,7']`）
 
 MT35 位置 (6,7) 有 `magicDragon`，击败后触发：
@@ -1800,8 +1811,8 @@ core.playSound('破墙镐');
 | I2 | ~~Key token K49/K50/K52 的绑定道具~~ | ✅ **全部坐实**（2026-06-04，源码 `actionsdata.onKeyUp` 派发表 + 玩家实测交叉验证，见 §I.8 权威表）：K49='1'=**pickaxe**、K50='2'=**bomb**、K52='4'=**earthquake**。三者均已绑定 `replay_keybindings.json` 并在 sim 实现 |
 | ~~I3~~ | ~~Special 14/19 battle 后处理~~ | **已确认**（见 §F） |
 | ~~I4~~ | ~~Tile ID 51 对应的道具 ID~~ | **已确认**：upFly（见 §B.4） |
-| J5 | 护身符（amulet）的获取楼层和条件 | 中 |
-| J6 | 魔法免疫 flag 的设置条件（MT3 伏击已确认为移除路径之一，见 §H） | 中 |
+| ~~J5~~ | ~~护身符（amulet）的获取楼层和条件~~ | **已解决**（2026-06-05，§C.8）：本塔**无 amulet、全图无 lavaNet 地形**（updateCheckBlock 源码坐实），护身符/血网机制**空置**，无获取楼层 |
+| ~~J6~~ | ~~魔法免疫 flag 的设置条件~~ | **已解决**（2026-06-05，§C.8）：设置路径 = 拾**神圣盾 shield5**（MT44(6,6)）itemEffect `setFlag('魔法免疫',true)`；移除路径 = MT3 伏击事件（§H） |
 | ~~I7~~ | ~~MT10 (6,3) 机关门开放机制~~ | **已确认**（见 §G） |
 | J8 | flag:fly 设置条件（fly魔杖飞行连通性检查的开关，见 §I.3.1） | 高 |
 | ~~J9~~ | ~~`flag:营救公主` 的设置时机和位置（MT24(6,2)→MT50 传送的触发条件，见 §I.9.3）~~ | **已确认**：MT26(6,6) 公主事件 false 分支 setValue + 跨层改写 MT24 col-6（见 §I.9.3） |
@@ -1811,7 +1822,7 @@ core.playSound('破墙镐');
 | ~~N-a~~ | ~~MT49 redKing /10 与 MT50 绝对设的交互；两魔王是否都杀~~ | **已裁定**（§N.4：各打各的，MT49 杀 /10 后魔王、MT50 杀绝对设 5000/1580/190） |
 | ~~N-b~~ | ~~flag:TE 真结局顺序 + MT49↔MT50 入场口径~~ | **已裁定**（§N.4：本 route=假结局 NE，杀 MT50 即通关；TE 另需破墙镐+下楼器，暂不实现） |
 | ~~N-c~~ | ~~whiteKing 8 格环逐格配对结算~~ | **已裁定**（§N.4：whiteKing=魔法警卫 tile246 special[16] 真实存在，8 个独立怪按 §C.4 夹击触发） |
-| J13 | **神圣盾免疫地形伤害**（玩家预告）：神圣盾对应哪个 flag？是 `flag:魔法免疫`／`no_zone`／`no_repulse`／`no_betweenAttack` 之一，还是独立护盾计数？获取楼层/条件？回源码坐实后接入 `_apply_zone_damage` 免疫判定（见 §C.7） | 中 |
+| ~~J13~~ | ~~神圣盾免疫地形伤害~~ | ✅ **已解决**（2026-06-05，§C.8）：神圣盾=shield5@MT44(6,6)，itemEffect `setFlag('魔法免疫',true)` + def+100；`flag:魔法免疫` 免疫**领域15/夹击16/阻击18/激光24/伏击27** 全部区域伤（updateCheckBlock 源码）。sim 已就绪（:930/:1242），单测 `test_holy_shield.py` 6 测全过 |
 | J14 | **MT43 移动的魔法警卫**（玩家预告）：MT43 whiteKing(246)@... 是否每回合/每步移动？移动规则（朝勇者?巡逻?）？sim 当前按静态怪处理——若实为移动怪，夹击触发格随之变，需建模移动 | 中 |
 | ~~J15~~ | ~~MT48 地震卷轴破 MT37 墙~~ | ✅ **已实现**（§L.6）：商人在 **MT47(5,2)**（非 MT48，原笔误已订正）price4000 give earthquake；经 **KEY:52**（键'4'）使用，效果=清**当前层全图**所有 canBreak 墙（tile 1/2），**不跨层**（在 MT37 当层用，破 MT37 自身墙）。token4417 属性全吻合 |
 | ~~J-G7c~~ | ~~MT41 右半区跨越口径矛盾~~ | ✅ **已解决**（2026-06-05，commit 1377688，见 §G7.3）：旧"全程不跨 (7,6)"分析有误，英雄确实到右侧 (9,2) 撞 (10,2)、杀隐藏怪、拾 downFly，揭示链已实现，tok4723/4925 PASS |

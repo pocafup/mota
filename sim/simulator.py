@@ -422,7 +422,10 @@ def _apply_stair_change(state: GameState) -> bool:
 def _use_snow(state: GameState) -> None:
     """冰魔法 snow（cls=constants，永久持有不消耗）：移除英雄四方向相邻 lava，
     该格 tile→0 永久变空地。lava 的 tile 号经 _id_to_tile_full['lava'] 数据驱动解析，
-    不硬编码。来源 §K.4（snowFourDirections=true）。"""
+    不硬编码。来源 §K.4（snowFourDirections=true）。
+    持有守卫：背包无 snow（items['snow']<=0）则不生效（与 centerFly 同款，solver 正确性必须）。"""
+    if state.hero.items.get("snow", 0) <= 0:
+        return
     floor = state.floor
     lava = floor._id_to_tile_full.get("lava")
     if lava is None:
