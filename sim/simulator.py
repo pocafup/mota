@@ -96,6 +96,10 @@ class FloorState:
     # firstArrive / afterGetItem（来自 JSON）
     first_arrive: list = field(default_factory=list)
     after_get_item: dict = field(default_factory=dict)
+    # outEvents（来自 JSON）：离开格触发事件 dict，键 "x,y"。h5mota 引擎 block.event.outEvent
+    # （挂在 block 实例上的离开事件，非 floor.events）。与 events(arrive) 对偶。read-only after load。
+    # 本塔仅 flower 防回头墙用它：MT33(8,10)/MT38(2,5) 离开该格→hide+closeDoor yellowWall 封死。
+    out_events: dict = field(default_factory=dict)
     _first_arrive_done: bool = False
     _event_break: bool = False
     # 不可通行地形 tile 集合（数据驱动，来自 tiles.json noPass:true：墙/熔岩/祭坛半格等）
@@ -148,6 +152,12 @@ class GameState:
     # 自动模式开关（help token 开启，见 §自动模式）：开启后每次同层移动结算后跑 floodfill，
     # 自动秒杀可达零伤非事件怪 + 自动拾取可达道具，迭代到不动点。tok5315 起 True，本 route 不复位。
     auto_mode: bool = False
+    # 单层段拷贝优化开关（塔无关性能 flag，默认 False=全量深拷，行为同历史）。置 True 时
+    # _copy_state 只深拷 current_floor、其余已加载层按引用共享(浅拷)——【仅当调用方保证本次
+    # 搜索全程不离开 current_floor】才可置位(单层段搜索即如此：只发 U/D/L/R、切层子态被裁剪、
+    # 切层路径只 load-if-missing+改 current_floor 指针，从不就地改非当前层 entities/terrain)。
+    # 由实验驱动 seg_experiment 在单层段入口置位；checkpoints/全程重放永不置位→默认全量深拷不变。
+    _single_floor_copy: bool = False
 
     @property
     def floor(self) -> FloorState:
@@ -164,8 +174,14 @@ def _copy_state(state: GameState) -> GameState:
         gold=h.gold, kill_count=h.kill_count,
         keys=dict(h.keys), items=dict(h.items), flags=dict(h.flags),
     )
+    # 单层段优化：只深拷 current_floor，其余层按引用共享（调用方保证不离开当前层，见 flag 注释）。
+    single = state._single_floor_copy
+    cur = state.current_floor
     new_floors: dict = {}
     for fid, f in state.floors.items():
+        if single and fid != cur:
+            new_floors[fid] = f  # 共享引用：单层段内非当前层从不被就地改动
+            continue
         new_floors[fid] = FloorState(
             floor_id=f.floor_id,
             terrain=[row[:] for row in f.terrain],
@@ -195,6 +211,7 @@ def _copy_state(state: GameState) -> GameState:
             up_floor=f.up_floor,
             first_arrive=f.first_arrive,
             after_get_item=f.after_get_item,
+            out_events=f.out_events,
             _first_arrive_done=f._first_arrive_done,
             _no_pass_tiles=f._no_pass_tiles,
             _tile_to_trigger=f._tile_to_trigger,
@@ -219,6 +236,7 @@ def _copy_state(state: GameState) -> GameState:
         dead=state.dead,
         won=state.won,
         auto_mode=state.auto_mode,
+        _single_floor_copy=single,
     )
 
 
@@ -336,6 +354,7 @@ def load_floor(path: Path) -> FloorState:
         is_hide=data.get("isHide", False),
         first_arrive=data.get("firstArrive", []),
         after_get_item=data.get("afterGetItem", {}),
+        out_events=data.get("outEvents", {}),
         _no_pass_tiles=no_pass_tiles,
         _tile_to_trigger=tile_to_trigger,
         _id_to_tile_full=id_to_tile_full,
@@ -963,6 +982,7 @@ def _apply_zone_damage(state: GameState, x: int, y: int) -> None:
 def _process_move(state: GameState, direction: str) -> None:
     hero = state.hero
     floor = state.floor
+    ox, oy = hero.x, hero.y   # 出发格：成功移出后触发其 outEvent（离开事件，如 flower 防回头封墙）
     dx, dy = _DIR[direction]
     nx, ny = hero.x + dx, hero.y + dy
 
@@ -995,6 +1015,7 @@ def _process_move(state: GameState, direction: str) -> None:
     if e_tile in floor._tile_to_item:
         _pickup_item(state, nx, ny)
         hero.x, hero.y = nx, ny
+        _fire_out_events(state, ox, oy)
         _apply_zone_damage(state, nx, ny)
         _fire_events(state, nx, ny)
         return
@@ -1004,6 +1025,7 @@ def _process_move(state: GameState, direction: str) -> None:
         # 事件已禁用（enable: false）→ hero 直接通过（如 MT1 作者NPC）
         if isinstance(ev, dict) and ev.get("enable") is False:
             hero.x, hero.y = nx, ny
+            _fire_out_events(state, ox, oy)
             _apply_zone_damage(state, nx, ny)
             return
         # 有激活事件（如商店/小偷列表事件）→ NPC 为 noPass，触发互动后 hero 不移入，需再按一次走入
@@ -1049,6 +1071,7 @@ def _process_move(state: GameState, direction: str) -> None:
         return
 
     hero.x, hero.y = nx, ny
+    _fire_out_events(state, ox, oy)
     _apply_zone_damage(state, nx, ny)
     _fire_events(state, nx, ny)
 
@@ -1361,6 +1384,27 @@ def _auto_floodfill_pass(state: GameState) -> bool:
 
 
 # ─── Event firing ────────────────────────────────────────────────────────────
+
+def _fire_out_events(state: GameState, x: int, y: int) -> None:
+    """离开 (x,y) 格触发的 outEvent（h5mota block.event.outEvent，与 _fire_events/arrive 对偶）。
+    数据来自 floor.out_events["x,y"]。本塔仅 flower 防回头墙：离开 (8,10)/(2,5) →
+    hide+closeDoor yellowWall 把该格封死（noPass，可破墙镐）。_suppressed_events 守门保证只封一次。"""
+    if state.dead:
+        return
+    floor = state.floor
+    loc_key = f"{x},{y}"
+    ev = floor.out_events.get(loc_key)
+    if ev is None:
+        return
+    if loc_key in floor._suppressed_events:   # 已封过（hide remove 置位）→ 不重复触发
+        return
+    if isinstance(ev, dict):
+        if not ev.get("enable", True):
+            return
+        ev = ev.get("data", [])
+    if ev:
+        _execute_event_list(state, ev, x, y)
+
 
 def _fire_events(state: GameState, x: int, y: int) -> None:
     if state.dead:        # 区域伤/事件致死 → 冻结，不触发本格事件（§M.8）

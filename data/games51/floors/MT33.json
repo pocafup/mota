@@ -192,5 +192,13 @@
     }
   },
   "afterOpenDoor": {},
-  "cannotMove": {}
+  "cannotMove": {},
+  "_outEvents_comment": "来源: live core.getBlock(8,10).event.outEvent（h5mota 把 event/outEvent 挂在 block 实例上，非 floor.events——这是 Playwright 提取系统性遗漏的一类『方块内联事件』，需全塔审计）。flower(168) 在 (8,10) 是『防回头墙/单向阀』：从左 (7,10) 向右穿过 (8,10)→(9,10) 后，(8,10) 永久封成 yellowWall(tile1,noPass,可破墙镐)，不能再从右折回。outEvent(离开(8,10)触发)=通用封格 [hide remove destruct + closeDoor yellowWall]，两条均无 loc → 默认作用于事件格(8,10)。建模口径(逐条翻译)：① arrive-event 原始 switch 含 moveHero right:1(向右进入则自动前进1格)——本塔 route 用 3 个独立 R token 逐格走 (7,10)→(8,10)→(9,10)→(10,10)，逐 token 重放已把这步走掉；若再实现 moveHero 自动前进会双走、破坏 46 检查点，故 moveHero 在 token 驱动模型里是 no-op。② arrive-event 的 false 分支(非 right 进入)hide+closeDoor 封格，与 outEvent 完全同效；且 (8,9)/(8,11) 均为墙(t=1)、(8,10) 无道具，『停在(8,10)』solver 只剩 (7,10)回头 / (9,10)前进两支、无可利用幻影分支，故 arrive 封格被 outEvent 封格涵盖，只建模 outEvent(离开封)即可达性等价。③ MT38(2,5) 同一开关、同机制(direction==='down')，待提取。noPass 矛盾已解：arrive-event 含 moveHero 证明英雄必能踏上 (8,10)→flower 可走(noPass:false，tiles.json 订正正确)，live 抓到的 noPass:true 是封格后读数。校验探针 diag_mt33_wallprobe.py。",
+  "_arrive_event_fidelity": "(8,10) block.event(踏上触发)原始脚本，仅存档不建模(理由见 _outEvents_comment): [{switch core.status.floorId: case 'MT33' -> if(getStatus('direction')==='right'){moveHero[right:1]} else {playSound 开关门; hide loc[[8,10]] remove destruct; closeDoor id:yellowWall loc[8,10]}; case 'MT38' -> if(direction==='down'){moveHero[down:1]} else {同构, loc(2,5)}}]。core.getBlock(9,10)=null(普通地板,无 event/outEvent)，封格全由 (8,10) 驱动。",
+  "outEvents": {
+    "8,10": [
+      {"type": "hide", "remove": true, "destruct": true},
+      {"type": "closeDoor", "id": "yellowWall"}
+    ]
+  }
 }

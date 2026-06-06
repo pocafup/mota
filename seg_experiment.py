@@ -146,10 +146,15 @@ def run_segment(cfg):
     print(f"目标格: {goal_cell}   基准 HP(route 出口): {baseline_hp}")
 
     # —— 搜索（profile + 计时）——
+    # 单层段拷贝优化：搜索入口用一份副本并置 _single_floor_copy=True（只深拷当前层、其余层共享引用）。
+    # 段搜索只发 U/D/L/R、切层子态被裁剪、切层路径从不就地改非当前层→共享安全。裁判(下方)仍用
+    # 未置位的 entry 全量深拷独立重放：既保持最大独立性，又顺带校验本优化(单层段两种拷贝必须等价)。
+    search_entry = _copy_state(entry)
+    search_entry._single_floor_copy = True
     pr = cProfile.Profile()
     t0 = time.perf_counter()
     pr.enable()
-    res = search_segment(entry, goal_cell, step, **search_kwargs)
+    res = search_segment(search_entry, goal_cell, step, **search_kwargs)
     pr.disable()
     elapsed = time.perf_counter() - t0
 
@@ -204,8 +209,9 @@ def run_segment(cfg):
     print(f"  route 完整向量: {_fmt_vec(route_vec)}")
     # 两边同口径投影后再判支配：常驻道具(cls!=tools)两边恒等、投影掉，避免假胜负(见 _project_for_compare)。
     route_cmp = _project_for_compare(route_vec, items_db)
-    strictly_better = [v for v in fr
-                       if _dominates(_project_for_compare(v, items_db), route_cmp)]
+    dom_idx = [i for i, v in enumerate(fr)
+               if _dominates(_project_for_compare(v, items_db), route_cmp)]
+    strictly_better = [fr[i] for i in dom_idx]
     if strictly_better:
         print(f"  [是] 找到 {len(strictly_better)} 个【完整向量】严格支配 route 的出口:")
         for v in strictly_better:
@@ -214,6 +220,42 @@ def run_segment(cfg):
         print(f"  [否] 前沿中无任一点在完整向量上严格支配 route")
         print(f"       → route 出口是该段 Pareto 前沿上的非支配点（要 HP 更高，必须"
               f"放弃钥匙 / 提前清掉地图储备，不存在「白赚」的严格更优点）。")
+
+    # —— 裁判独立重放严格支配点：确认引擎合法 + 完整动作序列 + 逐维对比表 ——
+    # 严格支配 route 的出口不能只停留在「搜索宣称」——必须丢回引擎独立重放确认真走得通，再把完整
+    # 动作序列 + 逐维对比表打出来供玩家在真实游戏核对。引擎只当裁判：重放终态须与搜索宣称逐项吻合。
+    acts = res.goal_frontier_actions or []
+    if dom_idx and acts:
+        gf, gx, gy = goal_cell
+        print("\n" + "=" * 72)
+        print("[严格支配 route 的出口] 裁判独立重放确认 + 动作序列（请玩家丢回真实游戏核对）：")
+        print("=" * 72)
+        for rank, i in enumerate(sorted(dom_idx, key=lambda j: -fr[j]["hp"])):
+            v = fr[i]
+            actions = acts[i]
+            rep = replay(entry, actions, step, _copy_state)
+            ok = (rep.current_floor == gf and rep.hero.x == gx and rep.hero.y == gy
+                  and rep.hero.hp == v["hp"] and rep.hero.atk == v["atk"]
+                  and rep.hero.def_ == v["def"] and rep.hero.kill_count == v["kill"])
+            repkeys = {k: vv for k, vv in rep.hero.keys.items() if vv}
+            print(f"\n  支配点#{rank + 1}（{len(actions)} 步）: {_fmt_vec(v)}")
+            print(f"    引擎裁判重放终态: @{rep.current_floor}({rep.hero.x},{rep.hero.y}) "
+                  f"HP={rep.hero.hp} ATK={rep.hero.atk} DEF={rep.hero.def_} "
+                  f"金={rep.hero.gold} kill={rep.hero.kill_count} keys={repkeys}  "
+                  f"{'[OK] 与搜索宣称一致' if ok else '[X] 与搜索宣称不符!'}")
+            print("    逐维 vs route(真值):")
+            for nm, sv, rvv in (("HP", rep.hero.hp, route_exit["hp"]),
+                                ("ATK", rep.hero.atk, route_exit["atk"]),
+                                ("DEF", rep.hero.def_, route_exit["def"]),
+                                ("金", rep.hero.gold, route_exit["gold"]),
+                                ("kill", rep.hero.kill_count, route_exit["kill"])):
+                d = sv - rvv
+                mark = "" if d == 0 else f"  (d{d:+d})"
+                print(f"        {nm:>4}: 重放={sv:>5}  route={rvv:>5}{mark}")
+            seq = "".join(actions)
+            print("    动作序列:")
+            for j in range(0, len(seq), 60):
+                print("      " + seq[j:j + 60])
 
     # —— 性能 ——
     print("\n" + "-" * 72 + "\n性能\n" + "-" * 72)

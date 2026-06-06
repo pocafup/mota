@@ -32,6 +32,7 @@ class SearchResult:
     final_hp: int                 # 搜索宣称的出口 HP（待裁判独立重放核对）
     claimed_state: object = None  # 搜索内部 step 推进得到的终态对象
     goal_frontier: list = None    # 到达目标格的多维 Pareto 前沿（list[value_map]）
+    goal_frontier_actions: list = None  # 与 goal_frontier 平行：各前沿点的动作序列(list[list[str]])，供裁判独立重放
     # —— 统计（供性能报告 / profile）——
     states_expanded: int = 0      # 出队并展开的状态数
     states_generated: int = 0     # step 产出的子状态数（≈ step 调用数）
@@ -220,5 +221,8 @@ def search_segment(entry_state, goal_cell, step_fn, max_states=2_000_000):
         st.final_hp = best[0]["hp"]
         st.actions = list(best[1])
         st.claimed_state = best[2]
+        # 平行展开：goal_frontier 与 goal_frontier_actions 同序，下标一一对应——
+        # 供 seg_experiment 对任一前沿点（尤其严格支配 route 的点）取回动作序列、丢回引擎独立重放。
         st.goal_frontier = [t[0] for t in goal_frontier]
+        st.goal_frontier_actions = [list(t[1]) for t in goal_frontier]
     return st
