@@ -177,5 +177,13 @@
   },
   "autoEvent": {},
   "afterOpenDoor": {},
-  "cannotMove": {}
+  "cannotMove": {},
+  "_outEvents_comment": "来源: live core.getBlock(2,5).event.outEvent，原始脚本已存档于 MT33.json 的 _arrive_event_fidelity（同一开关 switch floorId 含 MT33/MT38 两 case，玩家 2026-06-05 提供 live 数据）。flower(168) 在 (2,5) 是『防回头墙/单向阀』：从上 (2,4) 向下穿过 (2,5)→(2,6) 后，(2,5) 永久封成 yellowWall(tile1,noPass,可破墙镐)，不能再从下折回。几何核实(map[y][x]): (2,4)=0/(2,6)=0 地板、(1,5)=1/(3,5)=1 皆墙 → 纵向通道，direction==='down' 为允许方向(与 MT33(8,10) 横向 right 镜像同构)。outEvent(离开(2,5)触发)=通用封格 [hide remove destruct + closeDoor yellowWall]，两条均无 loc → 默认作用于事件格(2,5)。建模口径同 MT33(8,10)：① arrive-event 的 moveHero[down:1] 在 token 驱动模型里 no-op(逐 token 重放已把这步走掉，再实现会双走破坏检查点)；② arrive 的 false 分支(非 down 进入)封格与 outEvent 同效——封时机『进入 vs 离开』不改可达性(arrive 封格不阻止英雄移走，净效果均为『穿一次后封、回不来』)；③ (1,5)/(3,5) 皆墙、(2,5) 无道具，停在(2,5)只剩 (2,4)回头/(2,6)前进两支、无可利用幻影分支。故只建模 outEvent(离开封)即可达性等价。单测 tests/test_one_way_valve_mt38.py。",
+  "_arrive_event_fidelity": "(2,5) block.event(踏上触发)原始脚本 = MT33(8,10) 同一开关的 MT38 case(全文见 MT33.json _arrive_event_fidelity)：switch core.status.floorId case 'MT38' -> if(getStatus('direction')==='down'){moveHero[down:1]} else {playSound 开关门; hide loc[[2,5]] remove destruct; closeDoor id:yellowWall loc[2,5]}。仅存档不建模(理由见 _outEvents_comment)。core.getBlock(2,6)=普通地板(无 event/outEvent)，封格全由 (2,5) 驱动。",
+  "outEvents": {
+    "2,5": [
+      {"type": "hide", "remove": true, "destruct": true},
+      {"type": "closeDoor", "id": "yellowWall"}
+    ]
+  }
 }
