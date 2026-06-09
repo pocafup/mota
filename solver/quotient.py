@@ -24,9 +24,12 @@ goal_frontier_actions），调用方（phase1._run_block）照旧 solver.verify.
 最终整条线路逐字段一致、可直接照着走。
 
 塔无关：无任何楼层/怪/道具/阈值硬编码；可通行、可击杀、零伤、领域全由注入 state 的通用字段
-+ sim 的判定函数读出。第一版【单层内】搜索（离开入口层的算子裁掉，跨层/飞行算子留待后续）。
++ sim 的判定函数读出。cross_floor=False（默认，phase1 段内）= 单层内搜索（离层子态裁掉）；
+cross_floor=True 开启【跨层楼梯边】：changeFloor 格作 stair 算子、真实 step() 触发换层（免资源
+代价），门禁未满足的楼梯格因引擎不触发而自然不生成边。事件传送（MT3 重置/MT40/MT24 结局）仍排除，
+飞行边留待第二步（口径见 data/games51/floor_graph.md §7/§8）。
 """
-from collections import deque
+from collections import deque, Counter, namedtuple
 
 from sim.simulator import (
     WALL_TILES, SPECIAL_DOOR, AUTO_OPEN_TILES, DOOR_KEY_MAP,
@@ -88,6 +91,8 @@ def _is_free_tile(state, x, y, zone_blocked):
         return False
     if (x, y) in zone_blocked:
         return False
+    if f"{x},{y}" in floor.change_floor:
+        return False               # 换层格：换层是显式 stair 算子，不并入自由块（防块内行走误触发换层）
     t = floor.terrain[y][x]
     if (t in WALL_TILES or t in floor._no_pass_tiles or t == SPECIAL_DOOR
             or t in DOOR_KEY_MAP or t in AUTO_OPEN_TILES):
@@ -202,9 +207,12 @@ def _killable(state, x, y):
     return res is not None and res.damage is not None and res.damage < h.hp
 
 
-def _boundary_ops(state, free):
-    """枚举自由块边界上的付代价算子：杀怪 / 开钥匙门 / 撞自开假墙 / 撞触发型事件格。
+def _boundary_ops(state, free, cross_floor=False):
+    """枚举自由块边界上的付代价算子：（跨层时）走楼梯 / 杀怪 / 开钥匙门 / 撞自开假墙 / 撞触发型事件格。
     返回 [(kind, ox, oy, fx, fy, mv)]：从自由格 (fx,fy) 朝 (ox,oy) 发 mv 触发。
+    cross_floor=True 时，边界上的 changeFloor 格作 stair 算子（免资源代价的跨层【免费边】，但仍真实
+    step() 走过去触发换层、保 firstArrive/落点/剧情副作用）；门禁未满足的楼梯格 step() 不触发换层，
+    由 _expand_op 检测后不生成边（§7-B：满足门禁本身=另一个付代价合并，如打 boss）。
     trigger = 边界上挂【会触发的到达事件】的非怪格（NPC/踩格机关）：撞它会改地图（开门/移怪/
     显隐），是改变可达性的算子（地图连通性动态、CLAUDE.md 建图铁律）。撞 choices 型（商人/老人）
     会陷入拦截态，由 search_quotient 检测后裁掉并记录（不强解，留作放开决策依据）。
@@ -223,7 +231,9 @@ def _boundary_ops(state, free):
                 continue
             t = floor.terrain[oy][ox]
             e = floor.entities[oy][ox]
-            if e in floor._tile_to_enemy and _killable(state, ox, oy):
+            if cross_floor and f"{ox},{oy}" in floor.change_floor:
+                ops.append(("stair", ox, oy, fx, fy, mv)); seen_targets.add((ox, oy))
+            elif e in floor._tile_to_enemy and _killable(state, ox, oy):
                 ops.append(("kill", ox, oy, fx, fy, mv)); seen_targets.add((ox, oy))
             elif t in DOOR_KEY_MAP and h.keys.get(DOOR_KEY_MAP[t], 0) > 0:
                 ops.append(("door", ox, oy, fx, fy, mv)); seen_targets.add((ox, oy))
@@ -236,6 +246,8 @@ def _boundary_ops(state, free):
 
 def _expand_op(state, free, op, step_fn):
     """展开一个算子为动作序列并推进：走到触发格 (fx,fy) + 发 mv。返回 (new_state, moves) 或 None。
+    stair 型（走楼梯）：发 mv 踏上 changeFloor 格 → 引擎 _apply_stair_change 真实换层。若换层未发生
+    （门禁 enable=False / 目标层未加载 → 引擎不触发）则返回 None（无跨层边，§7-B 自然门控）。
     trigger 型（撞 NPC/踩格机关）：撞一下先触发事件（引擎对 noPass NPC 是停原格、不移入）；
     若事件清掉了该格实体且未陷拦截态，再发同向一步真正踏入（小偷暗道：撞→开道→走入），
     与钥匙门/假墙的「开了再走入」两步一致。门已开/实体仍在/陷拦截 → 不补步。"""
@@ -249,6 +261,10 @@ def _expand_op(state, free, op, step_fn):
         s = step_fn(s, m)
         if s.dead:
             return None
+    if kind == "stair":
+        if s.current_floor == state.current_floor:
+            return None            # 楼梯未触发（门禁未满足/目标层未加载）→ 无跨层边
+        return s, moves
     if (kind == "trigger" and not s.floor._event_intercepting
             and (s.hero.x, s.hero.y) != (ox, oy)):
         s2 = step_fn(s, mv)
@@ -285,30 +301,124 @@ def _absorb(state, step_fn):
 # ─── 商图指纹 + 搜索 ──────────────────────────────────────────────────────────
 
 def _qfp(state, free):
-    """商图身份维：当前自由块（frozenset 自由格）+ flags + 全局开关。自由格集合已编码
-    「哪些怪/门已消除」（消除即并入自由块）→ 不同可达态 = 不同指纹。持有资源不入（归价值维）。"""
+    """商图身份维：当前层 + 自由块（frozenset 自由格，剔除换层格）+ flags + 全局开关。自由格集合
+    已编码「哪些怪/门已消除」（消除即并入自由块）→ 不同可达态 = 不同指纹。持有资源不入（归价值维）。
+    剔除换层格：跨层落点英雄正踩楼梯格 vs 吸收后离开，可达块本体相同 → 身份维不应因「是否正踩楼梯」
+    分裂（楼梯格不连通 floodfill、仅作英雄落点单格出现，剔除不会并掉两个真实分量）。"""
     h = state.hero
     flags = tuple(sorted((k, v) for k, v in h.flags.items()
                          if isinstance(v, (int, float, str, bool))))
-    return (state.current_floor, frozenset(free), flags,
+    cf_xy = {tuple(map(int, k.split(","))) for k in state.floor.change_floor}
+    ident = frozenset(c for c in free if c not in cf_xy)
+    return (state.current_floor, ident, flags,
             state.auto_mode, state.dead, state.won)
 
 
-def search_quotient(entry_state, goal_cell, step_fn, max_states=2_000_000):
+def _stairs_key(state):
+    """beam 分坑维（推进度签名）：(当前层, 当前自由块边界上可达的 changeFloor 楼梯格集合)。
+    「可达」与 _boundary_ops 的 stair 算子同口径——楼梯格 ∈ change_floor 且 4-邻接某自由格即算
+    本块边界上可走的楼梯。语义：打开了通往某楼梯的路（多杀一只怪/多开一道门把上行梯并进自由块）的态
+    自成一坑、被 beam 强制保护，与原地刷怪攒属性的 grinder 分离 → 修『爬楼 climber 中途属性低、被
+    低层 grinder 占满 K 槽挤死』。比纯 current_floor 细（同层内"够到上行梯"vs"没够到"分两坑），比
+    完整块组合粗（楼梯数有界 → 永不退化成每态一坑）。塔无关：change_floor 是通用引擎数据，可达性由
+    floodfill 实算，不写死任何塔特有坐标。"""
+    floor = state.floor
+    cf_xy = {tuple(map(int, k.split(","))) for k in floor.change_floor}
+    if not cf_xy:
+        return (state.current_floor, frozenset())
+    free = _free_cells(state)
+    reachable = set()
+    for fx, fy in free:
+        for dx, dy in _DELTAS:
+            nb = (fx + dx, fy + dy)
+            if nb in cf_xy:
+                reachable.add(nb)
+    return (state.current_floor, frozenset(reachable))
+
+
+# ─── beam 控宽（按 BFS wave 截断；V/保护维口径全在 solver/beam.py，塔无关）──────────────
+
+_BeamPt = namedtuple("_BeamPt", ["state", "actions"])   # beam_select 只需 .state，落盘需 .actions
+
+
+def _beam_truncate_wave(next_pts, beam_k, st, wave_idx, sink, future=None, diversity_key_fn=None):
+    """把一个 BFS wave 的 admitted 子态 [(state, acts)] 按【Δ形式 V + 保护维 Pareto 骨架】截到
+    beam_k 个（口径见 solver/beam.py：V=HP−Σ_R cost 对杀怪中性；保护维=消耗道具全保+钥匙按当前层
+    门数封顶硬保护）。被截点交 sink 落盘审计（红线：不静默丢）。返回保留的 [(state, acts)]。
+    函数级 import solver.beam：beam 模块级 `from solver.quotient import _killable`，此处反向调用
+    若写模块级 import 会成循环依赖，故延迟到调用时导入（运行期两模块均已加载，无副作用）。
+    future（FutureCfg 或 None）：远区势能 cfg，透传给打分（None→V 与原版字节一致，见 beam.py）。
+    塔无关：V/保护维全由引擎 compute_combat + DOOR_KEY_MAP 算，本函数无任何楼层/怪/道具/阈值硬编码。"""
+    from solver.beam import (score_points, beam_select, equiv_hp_over_roster,
+                             beam_protection_overflow)
+    pts = [_BeamPt(state=c, actions=a) for (c, a) in next_pts]
+    overflow, skel = beam_protection_overflow(pts, beam_k, diversity_key_fn=diversity_key_fn)
+    roster, big, scores = score_points(pts, future=future)   # 单遍 V：选点/落盘复用同批缓存
+    score_fn = lambda stt: scores[id(stt)] if id(stt) in scores \
+        else equiv_hp_over_roster(stt, roster, big, future=future)
+    kept, cut = beam_select(pts, beam_k, score_fn=score_fn, diversity_key_fn=diversity_key_fn)
+    st.beam_cut_total += len(cut)
+    st.beam_waves_truncated += 1
+    if overflow:
+        st.beam_overflow_waves += 1
+    if sink is not None:
+        sink([{"wave": wave_idx, "floor": p.state.current_floor,
+               "V": score_fn(p.state), "value": value_vector(p.state),
+               "hp": p.state.hero.hp, "atk": p.state.hero.atk, "def": p.state.hero.def_,
+               "actions": "".join(p.actions)} for p in cut])
+    return [(p.state, p.actions) for p in kept]
+
+
+def search_quotient(entry_state, goal_cell, step_fn, max_states=2_000_000, cross_floor=False,
+                    beam_k=None, beam_cut_sink=None, on_admit=None, beam_future=None,
+                    beam_diversity=None):
     """块图搜索：从 entry_state 出发，停在 goal_cell 且出口价值 Pareto 最优。
     输出契约对齐 solver.search.search_segment（found/goal_frontier/goal_frontier_actions/统计）。
-    第一版单层内：消除算子若使英雄离开入口层则裁掉（跨层由 phase1 forced 骨架处理）。"""
+    cross_floor=False（默认，phase1 段内）：任何离层子态裁掉（跨层由 phase1 forced 骨架处理）。
+    cross_floor=True（跨层缩点）：楼梯(changeFloor)格作 stair 算子，真实 step() 触发换层、免资源
+      代价生成跨层子态；事件传送类离层（MT3 重置/MT40/MT24 结局）仍裁掉（第一步只接楼梯，见 §8）。
+      调用方须保证 entry_state._single_floor_copy=False（多层安全深拷），否则共享引用污染兄弟分支。
+    beam_k=None（默认）：无控宽，穷尽 Pareto 前沿（单层段内 / 小搜索用）。BFS 按 wave 推进（逐层
+      FIFO，与原扁平 deque 同处理序：所有深度 d 态先于 d+1、组内按生成序）→ 输出逐字段不变。
+    beam_k 设定（跨层大搜索控宽）：每个 wave 把本层 admitted 子态按 Δ形式 V + 保护维 Pareto 骨架
+      （solver/beam.py）截到 beam_k；被截点经 beam_cut_sink 落盘审计（红线不静默丢）。visited 无损
+      Pareto 去重与 beam 有损截断正交叠加：被截态留在 visited，他路若以【更优】向量重达同指纹仍放行。
+    beam_cut_sink(records)：回调，records=本 wave 被截点 [{wave,floor,V,value,hp,atk,def,actions}]；
+      None 则只计数不落盘。塔无关：驱动层(extract/)持有文件路径，solver 不写死任何路径。
+    on_admit(child, actions)：每个【通过去重入队】的子态回调一次（含日后被 beam 截掉的——「到达过」
+      即触发）；供驱动层做诊断统计（如各层可达最优属性 / 爬升轨迹）。None 则不调用、零开销。
+    beam_future（FutureCfg 或 None）：远区势能 cfg（修 R 近视、给"上层盾对整区减伤"以 V 信号），透传
+      到 beam 打分。None（默认）→ V 项=0、与原版字节一致；驱动层(extract/)用 build_future_roster
+      建集后传入。塔无关：roster 由共享表读全塔静态地图，solver 不写死任何塔特有数据。
+    beam_diversity（None / "floor" / "stairs"）：beam 截断的【分坑保护维】，修多样性饥饿（低层刷怪
+      便宜货占满 K 槽、爬楼 climber 被挤死）。None（默认）→ 单坑、与原版字节一致；"floor" → 按
+      current_floor 分坑，每层各保其保护骨架；"stairs" → 按 (current_floor, 当前块可达楼梯集) 分坑
+      （推进度签名，比楼层细：同层内"够到上行梯 vs 没够到"分两坑，强制保护 climber）。塔无关：key 从
+      state 读，不写死维度。"""
     goal_floor, gx, gy = goal_cell
-    entry_floor = entry_state.current_floor
+
+    if beam_diversity is None:
+        div_fn = None
+    elif beam_diversity == "floor":
+        div_fn = lambda s: s.current_floor
+    elif beam_diversity == "stairs":
+        div_fn = _stairs_key
+    else:
+        raise ValueError(
+            f"未知 beam_diversity={beam_diversity!r}（仅支持 None / 'floor' / 'stairs'）")
 
     st = SearchResult(found=False, actions=[], final_hp=0)
     st.goal_frontier = []
     st.goal_frontier_actions = []
+    st.n_waves = 0                  # BFS wave（深度层）数
+    st.beam_cut_total = 0          # beam 累计被截点数（落盘审计总量）
+    st.beam_waves_truncated = 0    # 触发截断的 wave 数
+    st.beam_overflow_waves = 0     # 保护骨架≥K 让位的 wave 数（保护未全保警告）
+    st.wave_log = []               # 每 wave (入宽, 原始出宽, 截后出宽)：膨胀曲线/控宽诊断
     goal_pts = []   # (vec, actions) 出口多维 Pareto 前沿
 
     start, start_moves = _absorb(entry_state, step_fn)
     visited = {}
-    queue = deque([(start, tuple(start_moves))])
     free0 = _free_cells(start)
     visited[_qfp(start, free0)] = [value_vector(start)]
     st.states_admitted = 1
@@ -316,69 +426,89 @@ def search_quotient(entry_state, goal_cell, step_fn, max_states=2_000_000):
     block_sizes_seen = []
     intercept_locs = set()   # 撞 choices 型事件(商人/老人/祭坛)→陷拦截态，记录不强解
 
-    while queue:
-        if len(queue) > st.frontier_peak:
-            st.frontier_peak = len(queue)
-        state, acts = queue.popleft()
-        st.states_expanded += 1
-        free = _free_cells(state)
-        block_sizes_seen.append(len(free))
+    wave = [(start, tuple(start_moves))]
+    while wave:
+        if len(wave) > st.frontier_peak:
+            st.frontier_peak = len(wave)
+        next_pts = []   # 本 wave 全体 admitted 子态（下一 wave 候选，beam 在此截断）
+        for state, acts in wave:
+            st.states_expanded += 1
+            free = _free_cells(state)
+            block_sizes_seen.append(len(free))
 
-        # 目标可达（在当前自由块内）→ 走过去记一个出口前沿点
-        if state.current_floor == goal_floor and (gx, gy) in free:
-            walk = _bfs_moves(state, free, (gx, gy))
-            if walk is not None:
-                gs = state
-                ok = True
-                for m in walk:
-                    gs = step_fn(gs, m)
-                    if gs.dead:
-                        ok = False
-                        break
-                if ok and (gs.hero.x, gs.hero.y) == (gx, gy):
-                    gvec = value_vector(gs)
-                    gacts = acts + tuple(walk)
-                    if not any(_ge_all(v, gvec) for v, _ in goal_pts):
-                        goal_pts = [(v, a) for (v, a) in goal_pts if not _ge_all(gvec, v)]
-                        goal_pts.append((gvec, gacts))
-                    st.goal_hits += 1
+            # 目标可达（在当前自由块内）→ 走过去记一个出口前沿点
+            if state.current_floor == goal_floor and (gx, gy) in free:
+                walk = _bfs_moves(state, free, (gx, gy))
+                if walk is not None:
+                    gs = state
+                    ok = True
+                    for m in walk:
+                        gs = step_fn(gs, m)
+                        if gs.dead:
+                            ok = False
+                            break
+                    if ok and (gs.hero.x, gs.hero.y) == (gx, gy):
+                        gvec = value_vector(gs)
+                        gacts = acts + tuple(walk)
+                        if not any(_ge_all(v, gvec) for v, _ in goal_pts):
+                            goal_pts = [(v, a) for (v, a) in goal_pts if not _ge_all(gvec, v)]
+                            goal_pts.append((gvec, gacts))
+                        st.goal_hits += 1
 
-        # 枚举付代价算子，逐个展开推进
-        ops = _boundary_ops(state, free)
-        n_ops_total += len(ops)
-        for op in ops:
-            res = _expand_op(state, free, op, step_fn)
-            st.states_generated += 1
-            if res is None:
-                continue
-            child, op_moves = res
-            if child.floor._event_intercepting:
-                intercept_locs.add((op[1], op[2]))   # choices 事件：陷拦截态，无 CHOICE 口径→跳过+记录
-                continue
-            if child.current_floor != entry_floor:
-                continue                          # 离层算子（楼梯等）→ 单层版裁掉
-            child, abs_moves = _absorb(child, step_fn)
-            if child.dead:
-                continue
-            child_free = _free_cells(child)
-            fp = _qfp(child, child_free)
-            cvec = value_vector(child)
-            cur = visited.get(fp)
-            if cur is not None and any(_ge_all(v, cvec) for v in cur):
-                continue
-            if cur is None:
-                visited[fp] = [cvec]
-            else:
-                visited[fp] = [v for v in cur if not _ge_all(cvec, v)] + [cvec]
-            st.states_admitted += 1
-            queue.append((child, acts + tuple(op_moves) + tuple(abs_moves)))
-            if st.states_generated >= max_states:
-                st.hit_cap = True
+            # 枚举付代价算子，逐个展开推进
+            ops = _boundary_ops(state, free, cross_floor)
+            n_ops_total += len(ops)
+            for op in ops:
+                res = _expand_op(state, free, op, step_fn)
+                st.states_generated += 1
+                if res is None:
+                    continue
+                child, op_moves = res
+                if child.floor._event_intercepting:
+                    intercept_locs.add((op[1], op[2]))   # choices 事件：陷拦截态，无 CHOICE 口径→跳过+记录
+                    continue
+                if child.current_floor != state.current_floor:
+                    # 离层子态：单层版一律裁掉；跨层版只放行楼梯边，事件传送(重置/结局/门禁传送)排除
+                    if not cross_floor or op[0] != "stair":
+                        continue
+                child, abs_moves = _absorb(child, step_fn)
+                if child.dead:
+                    continue
+                child_free = _free_cells(child)
+                fp = _qfp(child, child_free)
+                cvec = value_vector(child)
+                cur = visited.get(fp)
+                if cur is not None and any(_ge_all(v, cvec) for v in cur):
+                    continue
+                if cur is None:
+                    visited[fp] = [cvec]
+                else:
+                    visited[fp] = [v for v in cur if not _ge_all(cvec, v)] + [cvec]
+                st.states_admitted += 1
+                child_acts = acts + tuple(op_moves) + tuple(abs_moves)
+                if on_admit is not None:
+                    on_admit(child, child_acts)
+                next_pts.append((child, child_acts))
+                if st.states_generated >= max_states:
+                    st.hit_cap = True
+                    break
+            if st.hit_cap:
                 break
+
+        st.n_waves += 1
+        raw_out = len(next_pts)
+        # beam 控宽：本 wave 子态超 K 则按 V+保护维截断、落盘被截点（beam_k=None 时整段跳过→零回归）
+        if beam_k is not None and len(next_pts) > beam_k:
+            next_pts = _beam_truncate_wave(next_pts, beam_k, st, st.n_waves - 1,
+                                           beam_cut_sink, beam_future, div_fn)
+        st.wave_log.append((len(wave), raw_out, len(next_pts)))
+        wave = next_pts
         if st.hit_cap:
             break
 
     st.distinct_fingerprints = len(visited)
+    st.fp_by_floor = Counter(fp[0] for fp in visited)   # 跨层膨胀诊断：各层指纹数（fp[0]=current_floor）
+    st.floors_seen = sorted(st.fp_by_floor)
     st.n_blocks_peak = max(block_sizes_seen) if block_sizes_seen else 0
     st.n_ops_total = n_ops_total
     st.intercept_locs = sorted(intercept_locs)

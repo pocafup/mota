@@ -29,6 +29,8 @@ except Exception:
 
 from seg_experiment import build_initial_state, load_tokens
 from sim.simulator import _copy_state, step
+from solver.beam import (beam_protection_overflow, beam_select,
+                         equiv_hp_over_roster, score_points)
 from solver.frontier import FrontierPoint, merge_frontier, value_vector
 from solver.quotient import count_floor_blocks, search_quotient
 from solver.verify import replay
@@ -113,7 +115,36 @@ def _apply_cap(blockrec, points, width_cap, tag):
     return kept, len(cut)
 
 
-def _run_block(frontier, floor, goal, init, width_cap, tag):
+def _apply_beam(points, beam_k, tag):
+    """beam 控宽（玩家 2026-06-07 方案）：按 V 标量(HP+攻防/装备等效血量)排序、保护维(钥匙/消耗
+    道具)Pareto 骨架硬保护，截到 beam_k。被截点落盘(含 V 分 + 价值向量)可审计——绝不静默丢。
+    返回 (kept, n_cut)。V/beam 口径在 solver/beam.py，塔无关、引擎 compute_combat 算。"""
+    if beam_k is None or len(points) <= beam_k:
+        return points, 0
+    overflow, skel = beam_protection_overflow(points, beam_k)
+    roster, big, scores = score_points(points)        # 单遍：选点/落盘/cut 复用同一批 V 缓存
+    score_fn = lambda st: scores[id(st)] if id(st) in scores \
+        else equiv_hp_over_roster(st, roster, big)
+    kept, cut = beam_select(points, beam_k, score_fn=score_fn)
+    OUT_DIR.mkdir(exist_ok=True)
+    path = OUT_DIR / f"phase1_beam_cut_{tag}.jsonl"
+    with path.open("w", encoding="utf-8") as fh:
+        for p in cut:
+            fh.write(json.dumps({"value": value_vector(p.state), "V": score_fn(p.state),
+                                 "actions": "".join(p.actions)}, ensure_ascii=False) + "\n")
+    warn = f"  ⚠保护骨架{skel}≥K让位（保护未全保，已落盘）" if overflow else ""
+    print(f"      [beam K={beam_k}] 保留={len(kept)} 截断={len(cut)} 落盘 {path.name}{warn}")
+    return kept, len(cut)
+
+
+def _truncate(points, width_cap, beam_k, tag):
+    """统一控宽入口：beam_k 设定则走 beam（玩家方案），否则回退旧软截断（应急保活）。"""
+    if beam_k is not None:
+        return _apply_beam(points, beam_k, tag)
+    return _apply_cap(None, points, width_cap, tag)
+
+
+def _run_block(frontier, floor, goal, init, width_cap, beam_k, tag):
     """run block：对前沿每点用【块图】搜索到 goal、独立重放成全态、合并。返回 (frontier', stats)。
     段内搜索 = solver.quotient.search_quotient（缩点商图，替代朴素 BFS）；输出动作序列仍由
     solver.verify.replay 独立裁判逐字段核对。hit_cap 必上报（裁定②：被截不静默）。"""
@@ -148,36 +179,40 @@ def _run_block(frontier, floor, goal, init, width_cap, tag):
                 mismatch += 1
             raw.append(FrontierPoint(state=carried, actions=fp.actions + tuple(acts)))
     merged, mstats = merge_frontier(raw)
-    merged, truncated = _apply_cap(None, merged, width_cap, tag)
+    merged, truncated = _truncate(merged, width_cap, beam_k, tag)
+    best_hp = max((value_vector(p.state)["hp"] for p in merged), default=0)
     mstats.update(gen=gen, exp=exp, unreachable=unreachable, mismatch=mismatch,
                   truncated=truncated, raw=len(raw), capped=capped, q_states=q_states,
                   q_ops=q_ops, blocks_peak=blocks_peak, floor_blocks=floor_blocks,
-                  free_cells=free_cells, intercept=sorted(intercept))
+                  free_cells=free_cells, intercept=sorted(intercept), best_hp=best_hp)
     return merged, mstats
 
 
-def _forced_block(frontier, tok, width_cap, tag):
+def _forced_block(frontier, tok, width_cap, beam_k, tag):
     """forced block：对前沿每点逐字施加 tok（楼梯/伏击/对话/道具），合并。"""
     raw = [FrontierPoint(state=step(fp.state, tok), actions=fp.actions + (tok,))
            for fp in frontier]
     merged, mstats = merge_frontier(raw)
-    merged, truncated = _apply_cap(None, merged, width_cap, tag)
+    merged, truncated = _truncate(merged, width_cap, beam_k, tag)
+    best_hp = max((value_vector(p.state)["hp"] for p in merged), default=0)
     mstats.update(gen=0, exp=0, unreachable=0, mismatch=0, truncated=truncated, raw=len(raw),
                   capped=0, q_states=0, q_ops=0, blocks_peak=0, floor_blocks=0, free_cells=0,
-                  intercept=[])
+                  intercept=[], best_hp=best_hp)
     return merged, mstats
 
 
-def run_phase1(num_segments=5, width_cap=None, ref_sample=3):
+def run_phase1(num_segments=5, width_cap=None, beam_k=None, ref_sample=3):
     tokens = load_tokens()
     trace = trace_route(tokens)
     plan = build_plan(tokens, trace, max_floor_segments=num_segments)
     init = build_initial_state()
     frontier = [FrontierPoint(state=init, actions=())]
 
+    ctl = (f"beam K={beam_k}" if beam_k is not None
+           else (f"软截断 cap={width_cap}" if width_cap is not None else "无控宽(exact)"))
     print("=" * 84)
     print(f"阶段一闭环：从 {init.current_floor} 起跑前 {num_segments} 个楼层段"
-          f"（借 route 层序骨架；{len(plan)} 个 block）")
+          f"（借 route 层序骨架；{len(plan)} 个 block；控宽={ctl}）")
     print("=" * 84)
 
     seg_floor = {}     # seg -> 该段所在层（首个 block 的 floor）
@@ -191,12 +226,12 @@ def run_phase1(num_segments=5, width_cap=None, ref_sample=3):
         if kind == "run":
             _, floor, goal, i0, i1, _ = b
             seg_floor.setdefault(seg, floor)
-            frontier, ms = _run_block(frontier, floor, goal, init, width_cap, tag)
+            frontier, ms = _run_block(frontier, floor, goal, init, width_cap, beam_k, tag)
             desc = f"run {floor} →{goal} tok[{i0}..{i1}]"
         else:
             _, tok, i, _, changed = b
             seg_floor.setdefault(seg, frontier[0].state.current_floor if frontier else "?")
-            frontier, ms = _forced_block(frontier, tok, width_cap, tag)
+            frontier, ms = _forced_block(frontier, tok, width_cap, beam_k, tag)
             desc = f"forced {tok}@{i}" + ("  ⟶换层" if changed else "")
         dt = (time.perf_counter() - t0) * 1000
         rec = {"seg": seg, "kind": kind, "desc": desc, "ms": dt, **ms}
@@ -248,22 +283,23 @@ def _print_curve(blocklog, seg_floor, total_s):
         a["blocks"] = max(a["blocks"], r.get("floor_blocks", 0))
         a["free"] = max(a["free"], r.get("free_cells", 0))
         a["peak"] = max(a["peak"], r.get("blocks_peak", 0))
-    print("\n" + "=" * 92)
+    print("\n" + "=" * 104)
     print("膨胀曲线（裁定②控宽依据；块图版。宽度取段末携带前沿；块数=整层自由格→连通块）")
-    print("=" * 92)
+    print("=" * 104)
     print(f"{'段':>2} {'层':>5} {'自由格→块':>11} {'峰块':>5} {'段内状态':>8} "
-          f"{'段末宽度':>8} {'累计gen':>10} {'hit_cap':>7} {'段耗时ms':>9}")
-    print("-" * 92)
+          f"{'段末宽度':>8} {'段末最优HP':>10} {'累计gen':>10} {'hit_cap':>7} {'段耗时ms':>9}")
+    print("-" * 104)
     for seg in sorted(segs):
         r, a = segs[seg], agg[seg]
         blk = f"{a['free']}→{a['blocks']}" if a["blocks"] else "—"
         cap = f"⚠{a['capped']}" if a["capped"] else "0"
         print(f"{seg:>2} {seg_floor.get(seg, '?'):>5} {blk:>11} {a['peak']:>5} "
-              f"{a['q_states']:>8} {r['width']:>8} {a['gen']:>10,} {cap:>7} {a['ms']:>9.0f}")
+              f"{a['q_states']:>8} {r['width']:>8} {r.get('best_hp', 0):>10} "
+              f"{a['gen']:>10,} {cap:>7} {a['ms']:>9.0f}")
     tot_mm = sum(r["mismatch"] for r in blocklog)
     tot_tr = sum(r["truncated"] for r in blocklog)
     tot_cap = sum(r.get("capped", 0) for r in blocklog)
-    print("-" * 92)
+    print("-" * 104)
     print(f"  总耗时 {total_s:.1f}s  累计裁判不一致={tot_mm}"
           + ("（搜索优化无 bug）" if tot_mm == 0 else "  ⚠ 排查搜索优化")
           + f"  累计软截断={tot_tr}  累计 hit_cap={tot_cap}"
@@ -298,8 +334,10 @@ if __name__ == "__main__":
     ap.add_argument("mode", nargs="?", default="run", choices=["run", "analyze"])
     ap.add_argument("-n", "--segments", type=int, default=5)
     ap.add_argument("-c", "--cap", type=int, default=None)
+    ap.add_argument("--beam", type=int, default=None,
+                    help="beam 控宽 K（状态相关 V 排序+保护维硬保护）；设则走 beam，不设走旧软截断 -c")
     args = ap.parse_args()
     if args.mode == "analyze":
         _analyze(args.segments)
     else:
-        run_phase1(num_segments=args.segments, width_cap=args.cap)
+        run_phase1(num_segments=args.segments, width_cap=args.cap, beam_k=args.beam)
