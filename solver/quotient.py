@@ -306,6 +306,40 @@ def _absorb(state, step_fn):
         moves_all.extend(path)
 
 
+def _resolve_choices(state, base_moves, step_fn, max_depth=64):
+    """allow_purchase 专用：把陷入 choices 拦截态的子态，按【每个选项分支】真实 step CHOICE:i 解开，
+    枚举到脱离拦截为止，返回 [(已脱离拦截子态, 含 CHOICE token 的动作序列 tuple), ...]。
+    祭坛「买→再入循环」链由 (gold/atk/def/mdef/钥匙) 去重天然有界（每买一次 gold 降→状态变→不重复，
+    选离开 / 买到买不动即脱离）；max_depth 仅作失控护栏。「买几次」自收敛 = 价值决定，绝不写死。
+    只回非拦截态（深度耗尽 / 空 choices 仍拦截者丢弃，等价老版 intercept 跳过）。
+    塔无关：CHOICE / _event_pending_choices 是通用引擎拦截口径，solver 不认任何塔特有商店逻辑。"""
+    out = []
+    seen = set()
+    stack = [(state, base_moves, 0)]
+    while stack:
+        s, mv, depth = stack.pop()
+        if not s.floor._event_intercepting:
+            out.append((s, mv))
+            continue
+        if depth >= max_depth:
+            continue                       # 失控护栏：丢弃仍拦截态
+        choices = s.floor._event_pending_choices
+        if not choices:
+            continue                       # 拦截但无选项（非 choices 型）：丢弃，等价老版跳过
+        h = s.hero
+        key = (s.current_floor, h.x, h.y, h.gold, h.atk, h.def_, h.mdef,
+               tuple(sorted((k, v) for k, v in h.keys.items() if v)))
+        if key in seen:
+            continue
+        seen.add(key)
+        for i in range(len(choices)):
+            nxt = step_fn(s, f"CHOICE:{i}")
+            if nxt.dead:
+                continue
+            stack.append((nxt, mv + (f"CHOICE:{i}",), depth + 1))
+    return out
+
+
 # ─── 商图指纹 + 搜索 ──────────────────────────────────────────────────────────
 
 def _qfp(state, free):
@@ -387,7 +421,7 @@ def _beam_truncate_wave(next_pts, beam_k, st, wave_idx, sink, future=None, diver
 
 def search_quotient(entry_state, goal_cell, step_fn, max_states=2_000_000, cross_floor=False,
                     beam_k=None, beam_cut_sink=None, on_admit=None, beam_future=None,
-                    beam_diversity=None, beam_score_fn=None):
+                    beam_diversity=None, beam_score_fn=None, allow_purchase=False):
     """块图搜索：从 entry_state 出发，停在 goal_cell 且出口价值 Pareto 最优。
     输出契约对齐 solver.search.search_segment（found/goal_frontier/goal_frontier_actions/统计）。
     cross_floor=False（默认，phase1 段内）：任何离层子态裁掉（跨层由 phase1 forced 骨架处理）。
@@ -414,7 +448,12 @@ def search_quotient(entry_state, goal_cell, step_fn, max_states=2_000_000, cross
     beam_score_fn（可调用 state→数值 或 None）：beam 截断的【替换式】打分键，透传给 _beam_truncate_wave
       的 score_override。None（默认）→ 走原区势能/roster 打分（与原版字节一致）；给函数 → 直接当排序键
       （如 V_zone=HP−D，驱动层 extract/ 闭包持塔特有 zone 注入）。与 beam_future 互斥、它优先。λ=0 零回归
-      约定=驱动层在 λ=0 时传 None。塔无关：solver 不 import 任何塔特有模块，打分逻辑由注入闭包决定。"""
+      约定=驱动层在 λ=0 时传 None。塔无关：solver 不 import 任何塔特有模块，打分逻辑由注入闭包决定。
+    allow_purchase（默认 False）：是否解开 choices 拦截态（商人/祭坛等付金购买事件）。False（默认）→
+      撞 choices 即记 intercept_locs 并跳过、与原版【字节一致】（搜索结构性买不了任何东西）；True →
+      对每个拦截子态用 _resolve_choices 按选项分支真实 step CHOICE，把「买/不买、买 N 次」全展开成
+      并列子态进同一去重/入队管线，让「买不买、买几次」由价值（Pareto+beam）自行收敛，不写死次数。
+      这是补【购买能力】、非加估值项；intercept_locs 两路都照记（开时=买过的点也留痕，便于审计）。"""
     goal_floor, gx, gy = goal_cell
 
     if beam_diversity is None:
@@ -485,32 +524,39 @@ def search_quotient(entry_state, goal_cell, step_fn, max_states=2_000_000, cross
                     continue
                 child, op_moves = res
                 if child.floor._event_intercepting:
-                    intercept_locs.add((op[1], op[2]))   # choices 事件：陷拦截态，无 CHOICE 口径→跳过+记录
-                    continue
-                if child.current_floor != state.current_floor:
-                    # 离层子态：单层版一律裁掉；跨层版只放行楼梯边，事件传送(重置/结局/门禁传送)排除
-                    if not cross_floor or op[0] != "stair":
-                        continue
-                child, abs_moves = _absorb(child, step_fn)
-                if child.dead:
-                    continue
-                child_free = _free_cells(child)
-                fp = _qfp(child, child_free)
-                cvec = value_vector(child)
-                cur = visited.get(fp)
-                if cur is not None and any(_ge_all(v, cvec) for v in cur):
-                    continue
-                if cur is None:
-                    visited[fp] = [cvec]
+                    intercept_locs.add((op[1], op[2]))   # choices 事件：陷拦截态（记录留痕）
+                    if not allow_purchase:
+                        continue                          # 老版口径：无 CHOICE→跳过（字节一致）
+                    resolved = _resolve_choices(child, tuple(op_moves), step_fn)  # 解开买/不买/买N次
                 else:
-                    visited[fp] = [v for v in cur if not _ge_all(cvec, v)] + [cvec]
-                st.states_admitted += 1
-                child_acts = acts + tuple(op_moves) + tuple(abs_moves)
-                if on_admit is not None:
-                    on_admit(child, child_acts)
-                next_pts.append((child, child_acts))
-                if st.states_generated >= max_states:
-                    st.hit_cap = True
+                    resolved = [(child, op_moves)]
+                for rchild, rmoves in resolved:
+                    if rchild.current_floor != state.current_floor:
+                        # 离层子态：单层版一律裁掉；跨层版只放行楼梯边，事件传送(重置/结局/门禁传送)排除
+                        if not cross_floor or op[0] != "stair":
+                            continue
+                    rchild, abs_moves = _absorb(rchild, step_fn)
+                    if rchild.dead:
+                        continue
+                    child_free = _free_cells(rchild)
+                    fp = _qfp(rchild, child_free)
+                    cvec = value_vector(rchild)
+                    cur = visited.get(fp)
+                    if cur is not None and any(_ge_all(v, cvec) for v in cur):
+                        continue
+                    if cur is None:
+                        visited[fp] = [cvec]
+                    else:
+                        visited[fp] = [v for v in cur if not _ge_all(cvec, v)] + [cvec]
+                    st.states_admitted += 1
+                    child_acts = acts + tuple(rmoves) + tuple(abs_moves)
+                    if on_admit is not None:
+                        on_admit(rchild, child_acts)
+                    next_pts.append((rchild, child_acts))
+                    if st.states_generated >= max_states:
+                        st.hit_cap = True
+                        break
+                if st.hit_cap:
                     break
             if st.hit_cap:
                 break
