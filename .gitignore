@@ -21,3 +21,12 @@ __pycache__/
 
 # Claude Code 本地配置（不入库）
 .claude/
+
+# 搜索/重放临时产物（每次跑都生成、不入仓）
+*.log
+*.jsonl
+# json 仅窄域挡 extract/ 下路线/段出口/胜利路径产物，
+# 绝不挡 data/ 事实源与 extract/mt*_raw_capture.json / audit_*.json / blocksInfo_full.json
+extract/*route*.json
+extract/seg_exit_*.json
+extract/winning_path_*.json
