@@ -9,8 +9,9 @@
     「血瓶简化」+ 升级条件）。
   · 付代价合并算子：可击杀怪（damage<hp 才可战，否则硬墙节点）、钥匙门（持钥匙才可开）、
     自开假墙。执行 = 走到对象旁 + 触发，引擎 step 做真实合并（扣血/消钥匙/删墙）。
-  · 独立节点（不并入块，保留可达性差异 = 残留指纹）：挂事件格/怪（MT33 硬约束）、当前打不动
-    的怪、NPC/商人/老人/祭坛、特殊门、领域/夹击/阻击伤格（块内须零损血）。
+  · 独立节点（不并入块，保留可达性差异 = 残留指纹）：所有怪（可杀者另生 kill 算子、挂 afterBattle
+    /到达事件的怪也可杀=死后触发，「是否独立节点」与「是否可杀」解耦见 _killable）、挂到达事件的
+    非怪格（trigger）、NPC/商人/老人/祭坛、特殊门、领域/夹击/阻击伤格（块内须零损血）。
   · coin×2 兑现时机：杀怪 = 让该格并入自由块（残留指纹变）→ 「现在杀 vs 暂不杀」天然成两个
     指纹都保留，决策不被段内压掉。coin 金币翻倍的【价值】待 sim 接入 coin 机制后插入（见
     mechanics_status 待确认项）；本层只保证结构（杀/不杀分叉）在。
@@ -189,16 +190,22 @@ def _bfs_moves(state, free, target):
 # ─── 付代价算子 ─────────────────────────────────────────────────────────────────
 
 def _killable(state, x, y):
-    """(x,y) 的怪当前是否可战可杀（damage<hp 才可战，引擎 canBattle）。返回 bool。"""
+    """(x,y) 的怪当前是否可战可杀（damage<hp 才可战，引擎 canBattle）。返回 bool。
+
+    只判战斗胜负，【不】掺「是否独立节点」——后者由 _is_free_tile 独立保证（怪一律非自由格、
+    永不并入自由块，故未杀前的残留指纹天然保留，与可不可杀正交）。挂 afterBattle/beforeBattle
+    （战斗钩子）或到达事件的怪格【同样可杀】：怪是 noPass，英雄活着踩不上怪格 → 怪格上的任何
+    事件都是「怪死后」语义——引擎 step 杀怪即在 _fight_monster 内自然触发 afterBattle；之后那个
+    空格若仍挂到达事件，降级为 trigger 节点（_boundary_ops 的 trigger 分支有 e∉_tile_to_enemy
+    门控，怪格永不误判为 trigger）。全塔已核对：无任何「活怪格可踩触发剧情」的情形（MT33 单向阀
+    走 flower 地形+outEvents 通道、不经本函数；MT40/MT42 怪格到达事件皆为死后通行守卫）。
+    历史 bug：旧版把事件钩子并入不可杀 → MT10 骷髅队长(6,1)既非 kill 又非 trigger=无算子死节点、
+    boss 过不去。解耦后队长可 kill、afterBattle 开三门、boss 区按新态重算进自由块。"""
     floor = state.floor
     e = floor.entities[y][x]
     mid = floor._tile_to_enemy.get(e)
     if mid is None:
         return False
-    loc = f"{x},{y}"
-    if (_live_arrive_event(floor, x, y) or loc in floor.after_battle
-            or loc in floor.before_battle):
-        return False                # 挂事件怪 = 独立节点（到达事件未消/战斗钩子），MT33 约束
     h = state.hero
     mon = _build_monster(state, mid)
     res = compute_combat(PlayerState(hp=h.hp, atk=h.atk, def_=h.def_, mdef=h.mdef), mon,
@@ -216,7 +223,8 @@ def _boundary_ops(state, free, cross_floor=False):
     trigger = 边界上挂【会触发的到达事件】的非怪格（NPC/踩格机关）：撞它会改地图（开门/移怪/
     显隐），是改变可达性的算子（地图连通性动态、CLAUDE.md 建图铁律）。撞 choices 型（商人/老人）
     会陷入拦截态，由 search_quotient 检测后裁掉并记录（不强解，留作放开决策依据）。
-    挂事件的【怪】= 独立节点（MT33 约束），不在此列为 trigger（_killable 已排除）。"""
+    挂事件的【怪】走 kill 算子（杀掉后引擎 step 自然触发 afterBattle/到达事件=死后语义）：trigger
+    分支 e∉_tile_to_enemy 门控保证怪格永不误判为 trigger，杀后那个空格若仍挂到达事件再降级 trigger。"""
     floor = state.floor
     h = state.hero
     ops = []
@@ -341,21 +349,29 @@ def _stairs_key(state):
 _BeamPt = namedtuple("_BeamPt", ["state", "actions"])   # beam_select 只需 .state，落盘需 .actions
 
 
-def _beam_truncate_wave(next_pts, beam_k, st, wave_idx, sink, future=None, diversity_key_fn=None):
+def _beam_truncate_wave(next_pts, beam_k, st, wave_idx, sink, future=None, diversity_key_fn=None,
+                        score_override=None):
     """把一个 BFS wave 的 admitted 子态 [(state, acts)] 按【Δ形式 V + 保护维 Pareto 骨架】截到
     beam_k 个（口径见 solver/beam.py：V=HP−Σ_R cost 对杀怪中性；保护维=消耗道具全保+钥匙按当前层
     门数封顶硬保护）。被截点交 sink 落盘审计（红线：不静默丢）。返回保留的 [(state, acts)]。
     函数级 import solver.beam：beam 模块级 `from solver.quotient import _killable`，此处反向调用
     若写模块级 import 会成循环依赖，故延迟到调用时导入（运行期两模块均已加载，无副作用）。
     future（FutureCfg 或 None）：远区势能 cfg，透传给打分（None→V 与原版字节一致，见 beam.py）。
+    score_override（可调用 state→数值 或 None）：驱动层注入的【替换式】打分键（如 V_zone=HP−D）。
+      None（默认）→ 走原 score_points/equiv_hp_over_roster（区势能 future 口径）、与原版字节一致；
+      给函数 → 直接用它当 beam 排序键（旁路 roster 单遍打分），solver 不 import 任何塔特有模块（闭包
+      持塔特有 zone 在驱动层 extract/）。两者互斥、override 优先；λ=0 零回归约定=驱动层在 λ=0 时传 None。
     塔无关：V/保护维全由引擎 compute_combat + DOOR_KEY_MAP 算，本函数无任何楼层/怪/道具/阈值硬编码。"""
     from solver.beam import (score_points, beam_select, equiv_hp_over_roster,
                              beam_protection_overflow)
     pts = [_BeamPt(state=c, actions=a) for (c, a) in next_pts]
     overflow, skel = beam_protection_overflow(pts, beam_k, diversity_key_fn=diversity_key_fn)
-    roster, big, scores = score_points(pts, future=future)   # 单遍 V：选点/落盘复用同批缓存
-    score_fn = lambda stt: scores[id(stt)] if id(stt) in scores \
-        else equiv_hp_over_roster(stt, roster, big, future=future)
+    if score_override is not None:
+        score_fn = score_override                            # 注入式替换打分（如 V_zone），旁路 roster
+    else:
+        roster, big, scores = score_points(pts, future=future)   # 单遍 V：选点/落盘复用同批缓存
+        score_fn = lambda stt: scores[id(stt)] if id(stt) in scores \
+            else equiv_hp_over_roster(stt, roster, big, future=future)
     kept, cut = beam_select(pts, beam_k, score_fn=score_fn, diversity_key_fn=diversity_key_fn)
     st.beam_cut_total += len(cut)
     st.beam_waves_truncated += 1
@@ -371,7 +387,7 @@ def _beam_truncate_wave(next_pts, beam_k, st, wave_idx, sink, future=None, diver
 
 def search_quotient(entry_state, goal_cell, step_fn, max_states=2_000_000, cross_floor=False,
                     beam_k=None, beam_cut_sink=None, on_admit=None, beam_future=None,
-                    beam_diversity=None):
+                    beam_diversity=None, beam_score_fn=None):
     """块图搜索：从 entry_state 出发，停在 goal_cell 且出口价值 Pareto 最优。
     输出契约对齐 solver.search.search_segment（found/goal_frontier/goal_frontier_actions/统计）。
     cross_floor=False（默认，phase1 段内）：任何离层子态裁掉（跨层由 phase1 forced 骨架处理）。
@@ -394,7 +410,11 @@ def search_quotient(entry_state, goal_cell, step_fn, max_states=2_000_000, cross
       便宜货占满 K 槽、爬楼 climber 被挤死）。None（默认）→ 单坑、与原版字节一致；"floor" → 按
       current_floor 分坑，每层各保其保护骨架；"stairs" → 按 (current_floor, 当前块可达楼梯集) 分坑
       （推进度签名，比楼层细：同层内"够到上行梯 vs 没够到"分两坑，强制保护 climber）。塔无关：key 从
-      state 读，不写死维度。"""
+      state 读，不写死维度。
+    beam_score_fn（可调用 state→数值 或 None）：beam 截断的【替换式】打分键，透传给 _beam_truncate_wave
+      的 score_override。None（默认）→ 走原区势能/roster 打分（与原版字节一致）；给函数 → 直接当排序键
+      （如 V_zone=HP−D，驱动层 extract/ 闭包持塔特有 zone 注入）。与 beam_future 互斥、它优先。λ=0 零回归
+      约定=驱动层在 λ=0 时传 None。塔无关：solver 不 import 任何塔特有模块，打分逻辑由注入闭包决定。"""
     goal_floor, gx, gy = goal_cell
 
     if beam_diversity is None:
@@ -500,7 +520,7 @@ def search_quotient(entry_state, goal_cell, step_fn, max_states=2_000_000, cross
         # beam 控宽：本 wave 子态超 K 则按 V+保护维截断、落盘被截点（beam_k=None 时整段跳过→零回归）
         if beam_k is not None and len(next_pts) > beam_k:
             next_pts = _beam_truncate_wave(next_pts, beam_k, st, st.n_waves - 1,
-                                           beam_cut_sink, beam_future, div_fn)
+                                           beam_cut_sink, beam_future, div_fn, beam_score_fn)
         st.wave_log.append((len(wave), raw_out, len(next_pts)))
         wave = next_pts
         if st.hit_cap:

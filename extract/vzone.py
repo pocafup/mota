@@ -29,7 +29,7 @@ except Exception:
     pass
 
 from seg_experiment import build_initial_state
-from sim.simulator import _build_monster
+from sim.simulator import _build_monster, WALL_TILES
 from sim.combat import PlayerState, compute_combat
 from seg_identify_zone1 import analyze_floor, ZONE1
 
@@ -164,6 +164,111 @@ def vzone(zone, fid, x, y, hp, atk, def_, mdef):
     bf = boss_toll(zone, atk, def_, mdef)
     D = reach + bf
     return hp - D, reach, bf
+
+
+# ───── 前置2：boss 层 V_zone 退化修复（beam-core 形态：吃 live GameState，D 指向 boss 格）─────
+#
+# 旧口径 shortest_toll(dst=None) = "到 MT10 任意格即 reach"。src 已在 MT10 → 立即 reach=0 →
+# D=boss_toll=常量 → MT10 各格 V_zone=HP−常量、零朝 boss 梯度，每杀一只埋伏怪纯失血、零进度信用
+# （vzone_verify_d_ambush 的 D0 诊断坐实：(6,5)/(6,4)/(1,11)/(6,8) reach 全 0、D 全 1045）。
+#
+# 修法：D 改成"走到并【打掉】boss 格的最短累计损血"——boss 格 enter-cost 即含 boss 战，不再单加 boss_toll：
+#   · boss 已败(flag:BOSS_FLAG)   → D=0（区清，剩走到出口是零损血路）→ V_zone=HP（吸完奖励→出口最高）；
+#   · 在 boss 层(BOSS_FLOOR)       → live 单层 Dijkstra 指向 live 队长格（埋伏后 (6,4)→(6,1)，扫 entities
+#                                   实时定位），读现场 state.floors[MT10] → 杀掉的埋伏怪 enter-cost 归 0、
+#                                   boss 战 toll 随属性现算（铁律：改图事件后不复用静态）；
+#   · 在区内他层                   → 静态跨层图 shortest_toll 指向静态 boss 格(BOSS_CELL)，MT1-9 静止精确；
+#   · 区外层                       → D=0（无区信息）。
+#
+# beam-core 形态：v_zone(zone, state) 吃【活 GameState】（与 beam.equiv_hp_over_roster 同形），将来按
+# λ 旋钮塞进 beam 打分（V=…−λ·D）、λ=0 零回归。boss 层/格/旗此处在 extract/ 驱动层硬编（允许读 MT1-10）；
+# 搬进 solver/ 时须改由 beam._is_region_boundary/build_future_roster 的塔无关门禁检测产出（不写死层号）。
+#
+# ⚠ 固有局限（明记不静默、非退化 bug，不可硬编码绕过）：最短路 D 只对【路径上】障碍记损血。MT10 埋伏是
+#   "封房须清全 8 怪"语义——但乐观松弛下机关门 (6,3) 当可过、队长 (6,1) 经中央走廊((6,4)→(6,3)→(6,2))可达，
+#   8 埋伏怪里只有踩在中央走廊上的 (6,4) 那只在到队长的最短路上（清它 D 才降），另 7 只在侧格、清它们 D 不降。
+#   → kill-8 段 HP 降而 D 近平 → V_zone 会先跌、再于杀队长(预测的 boss 损血兑现，V_zone 近平)+吸奖励(D=0、
+#   HP 跃升)一举到顶。这是最短路启发式建不出"封房全清"的本质，非 boss 层退化；且 D-findings 已证埋伏室一旦
+#   踏入即被封、块抽象上连杀是唯一推进（怯战不可表达）→ 该 V_zone 跌幅无害（无更高-V 替代可逃）。
+
+BOSS_FLOOR = "MT10"
+BOSS_CELL = (6, 4)              # 静态队长格（埋伏前）；live 队长由 boss_cell_live 扫 entities 实时定位
+BOSS_FLAG = "10f战胜骷髅队长"
+
+
+def boss_cell_live(state, boss_mid):
+    """扫当前 live 层 entities 找 boss(boss_mid) 当下坐标：埋伏后队长 (6,4)→(6,1)；杀后不在场→None。"""
+    fl = state.floor
+    ents = fl.entities
+    for y in range(len(ents)):
+        row = ents[y]
+        for x in range(len(row)):
+            if fl._tile_to_enemy.get(row[x]) == boss_mid:
+                return (x, y)
+    return None
+
+
+def _live_passable(floor, x, y):
+    """live 单层乐观可过：非硬墙(WALL_TILES ∪ _no_pass_tiles)即可过 —— 门/特殊门/假墙/楼梯/事件/拾取/
+    怪格全当可过（admissible：D 低估真实损血、剪枝不错杀）。读现场 terrain（改图事件后不复用静态，铁律）。"""
+    rows, cols = len(floor.terrain), len(floor.terrain[0])
+    if not (0 <= x < cols and 0 <= y < rows):
+        return False
+    t = floor.terrain[y][x]
+    return t not in WALL_TILES and t not in floor._no_pass_tiles
+
+
+def live_shortest_toll(state, src, dst, atk, def_, mdef):
+    """live 单层 Dijkstra：src→走到并【打掉】dst 格的最小累计损血（dst enter-cost 即含其战斗）。
+    enter_cost(格) = 该格 live 怪的强制可杀 toll（无怪→0），读现场 entities（铁律：改图后不复用静态）。
+    无路→inf。src 任意（不限英雄当前格，供逐格梯度采样）。"""
+    floor = state.floor
+    dist = {src: 0}
+    pq = [(0, src)]
+    while pq:
+        d, node = heapq.heappop(pq)
+        if d > dist.get(node, float("inf")):
+            continue
+        if node == dst:
+            return d
+        x, y = node
+        for dx, dy in _NB4:
+            nx, ny = x + dx, y + dy
+            if not _live_passable(floor, nx, ny):
+                continue
+            mid = floor._tile_to_enemy.get(floor.entities[ny][nx])
+            cost = _toll(_build_monster(state, mid), atk, def_, mdef) if mid is not None else 0
+            nd = d + cost
+            if nd < dist.get((nx, ny), float("inf")):
+                dist[(nx, ny)] = nd
+                heapq.heappush(pq, (nd, (nx, ny)))
+    return float("inf")
+
+
+def v_zone(zone, state):
+    """【beam-core 形态】V_zone = HP − D，吃 live GameState。返回 (vz, D, info)。
+    D = 走到并打掉 boss 的最短累计损血；boss 格 enter-cost 即含 boss 战，不再单加 boss_toll。口径见上段。"""
+    h = state.hero
+    fid = state.current_floor
+    if fid not in zone["floors"]:
+        return h.hp, 0, "off-zone"
+    if h.flags.get(BOSS_FLAG):
+        return h.hp, 0, "boss-cleared"            # 区已清 → D=0
+    if fid == BOSS_FLOOR:
+        bc = boss_cell_live(state, zone["boss_mid"])
+        if bc is None:
+            return h.hp, 0, "boss-gone"           # boss 不在场又没旗（异常）→ 保守 D=0
+        D = live_shortest_toll(state, (h.x, h.y), bc, h.atk, h.def_, h.mdef)
+        info = f"live→boss{bc}"
+    else:
+        dst = (BOSS_FLOOR, *BOSS_CELL)
+        D = shortest_toll(zone, (fid, h.x, h.y), h.atk, h.def_, h.mdef, dst=dst)
+        if D != float("inf") and dst not in zone["mon_cache"]:
+            D += boss_toll(zone, h.atk, h.def_, h.mdef)   # boss 格非 pay-kill 时补 boss 战 toll
+        info = f"static→{BOSS_FLOOR}{BOSS_CELL}"
+    if D == float("inf"):
+        return float("-inf"), float("inf"), info + "/UNREACH"
+    return h.hp - D, D, info
 
 
 # ────────────────────────────── 自检 ──────────────────────────────

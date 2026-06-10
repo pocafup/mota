@@ -5,7 +5,7 @@
 
 ---
 
-## 🟢 V_zone(区势能启发) 验证 A/B/C/D 全过 + 纯V_zone独立缓解Q2砍谷底(分坑零贡献) + 全量接入【两个硬前置】已定位（2026-06-09）
+## 🟢 V_zone(区势能启发) 验证 A/B/C/D 全过 + 纯V_zone独立缓解Q2砍谷底(分坑零贡献) + 全量接入【前置1已修✅/前置2待修】（2026-06-09）
 
 > `V_zone = HP − D`，D=当前格→MT10 boss 的最短损血路（admissible 下界）。在 `extract/` 隔离脚本里全程验完（**零碰 solver 核心**：复用展开原语 `_absorb/_boundary_ops/_expand_op/_qfp` + `beam.beam_select`，唯一变量是把 score 换成 V_zone）。结论：**纯 V_zone 自己诱导出延迟交战**（MT3 裸攻态 wave15 自主搜到去 MT5 拿铁剑），且**面对 MT10 埋伏硬必杀段不怯战**（连杀 8/8）。怯战 caveat 排除、动态 kill-neutral cache **不为此做**。但 D 测顺带挖出全量接入的**两个硬前置**。
 
@@ -20,7 +20,11 @@
 - **怯战副作用排除**：固定 mon_cache 口径惩罚杀怪（杀→HP↓ 但 D 不降→V_zone↓），但在拿剑程和 MT10 硬必杀段都没造成瘫痪。
 
 ### ⚠ 全量接入【两个硬前置】（玩家 2026-06-09 定的方向）
-- **前置 1（队长结构性不可杀，真 blocker）**：MT10 队长(6,1) 挂 afterBattle → `_killable`(`solver/quotient.py`) 一刀切排除挂事件的怪 → 展开原语**只生 trigger 算子、生不出 kill** → beam 过不了 boss（D 测实证：清完 8 只后 kill 算子=0）。**修法（玩家定）**：挂事件的怪**【仍当独立节点、不进收缩边内】（边内要静态，这条对的）**，但**【必须仍生成 kill 算子（打掉它 + 触发其 afterBattle），而不是只剩 trigger】**——「不进边」和「不能打」是两回事，现在一刀切排除错了。这是「埋伏放怪 / boss 搬家这类运行时机制怎么在 beam 建模」的硬前置。
+- **前置 1（队长结构性不可杀，真 blocker）✅ 已修（2026-06-09）**：MT10 队长(6,1) 挂 afterBattle → 旧 `_killable`(`solver/quotient.py`) 一刀切排除挂 afterBattle/beforeBattle/到达事件的怪 → 展开原语**只生 trigger 算子、生不出 kill** → beam 过不了 boss。
+  - **修法**：把 `_killable` 里的事件排除**整段删掉**——「是否独立节点」与「是否可杀」**解耦**：怪是 noPass、英雄活着踩不上怪格 → 怪格上的一切事件（afterBattle 战斗钩子 / 到达事件）**都是「怪死后」语义**，故都可杀；杀经 `_expand_op→step` 在引擎 `_fight_monster` 内**自然触发 afterBattle**。独立节点身份由 `_is_free_tile`（怪一律非自由格、永不并入块）**独立保住**，与可杀正交。全塔核对无「活怪格可踩触发剧情」之例（MT33 单向阀走 flower+outEvents、不经 `_killable`；MT40/MT42 两个「怪+到达事件」格皆死后通行守卫；beforeBattle 全塔=0=死代码）。
+  - **关键发现——队长是【两步】过、非直接 kill**：队长被**决斗喊话到达事件 `events["6,2"]`**（`"来吧,我要与你决斗!"`+`hide remove` 自删）门控。缩点序列：①连杀 8 埋伏怪（kill 算子）→ autoEvent 开 (6,3)；②(6,2) 是独立 **trigger 节点**挡在队长与自由块之间，队长此刻**不**直接出 kill；触发 (6,2)（自删入 `_suppressed_events`、英雄踏入）；③队长暴露在边界 → **kill 算子出现** → 杀之 → afterBattle 开 boss 三门 (4,4)/(6,7)/(8,4)+清红门(6,9)+置 `flag:10f战胜骷髅队长` → 自由块涨到 39 格 → **走 (6,11) 楼梯进 MT11**（实测 atk20 态 HP=2475）。
+  - **⚠ `extract/vzone_verify_d_ambush.py` 的「结构性停在队长」结论已过期**：其硬编码叙事写于旧 `_killable`（脚本自己已打印矛盾 `_killable 判定=True … 预期 False`），且其 loop 在「8 怪清完」即 `break`、只看那一瞬的边界算子（=(6,2) trigger）、**没多走一步触发 (6,2) 暴露队长**。非真死路。
+  - **测试**：`tests/test_quotient_killable_hooks.py`（7 项）——队长可杀 / 两步门控→杀→afterBattle 开三门 / 队长杀前仍独立节点 / MT2(6,2)(8,2)+MT8(9,5)(11,5) 四钩子怪「可杀但仍独立节点」。MT33 单向阀 4 单测仍 PASS=反证隔离。**全套 100 green、`_killable` 不在 sim → 重放/检查点自动零回归**。
 - **前置 2（boss 层 V_zone 退化，次要）**：`shortest_toll` 目标是「到本层任意格」，src 已在 boss 层 → reach=0 → D=boss_toll 常量 → **零推进梯度**（D 测实证：MT10 各格 reach 全 0、D 全 1045、V_zone=HP−常量）。**修法**：boss 层目标**指向 boss 格 / 出口**，而非「任意层格」。
 
 ### 已确认 + 下一步

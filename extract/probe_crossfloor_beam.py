@@ -116,15 +116,35 @@ def main():
                     help="beam 分坑保护维：none=单坑(原版，低层刷怪便宜货占满 K 槽挤死 climber)；"
                          "floor=按 current_floor 分坑各保骨架，强制保留爬楼党；"
                          "stairs=按 (层,可达楼梯集) 分坑(推进度签名，同层内够到上行梯 vs 没够到分两坑)")
+    ap.add_argument("--score", default="region", choices=["region", "vzone"],
+                    help="beam 打分键：region=原区势能/roster（默认，λ 控；λ=0 与原版字节一致=零回归基线）；"
+                         "vzone=V_zone=HP−D 替换式打分（前置2 修好的 live boss 梯度，注入 beam_score_fn 旁路 roster）")
     args = ap.parse_args()
     beam_diversity = None if args.diversity == "none" else args.diversity
     goal_cell = (args.goal_floor, 1, 1)
+    score_tag = "" if args.score == "region" else f"_{args.score}"
+
+    # ── V_zone 替换式打分（仅 --score vzone 时注入）：塔特有 zone（含 MT10 boss）在驱动层 extract/ 构建、
+    #    闭包持有；solver 只收一个 state→数值 闭包、不 import 任何塔特有模块（塔无关铁律）。score_override 优先于 roster。
+    beam_score_fn = None
+    if args.score == "vzone":
+        from vzone import build_zone as _build_zone_vz, v_zone as _v_zone
+        _vz_zone = _build_zone_vz()
+        _vz_memo = {}                       # id(state)->(state_ref, score)：beam_select 每点多次调 score_fn，
+        def beam_score_fn(s):               # 而 v_zone 每调一次跑 Dijkstra；按对象 memo（持 ref 防 id 复用，zone-1 规模可控）
+            hit = _vz_memo.get(id(s))
+            if hit is not None and hit[0] is s:
+                return hit[1]
+            v = _v_zone(_vz_zone, s)[0]      # HP−D 标量；-inf=boss 无路（排最末）
+            _vz_memo[id(s)] = (s, v)
+            return v
 
     start, nopen = build_start()
     h = start.hero
     print("=" * 96)
     print(f"跨层楼梯缩点 + beam 控宽 自主爬升检验（cross_floor=True，beam K={args.beam}，"
-          f"λ={args.lam}，分坑={args.diversity}，_single_floor_copy=False）")
+          f"打分={'V_zone=HP−D(替换式,前置2 live梯度)' if args.score == 'vzone' else f'区势能/roster λ={args.lam}'}，"
+          f"分坑={args.diversity}，_single_floor_copy=False）")
     print("=" * 96)
     print(f"起点(穿过 {nopen} token 强制开局噩梦后首个自由态): {start.current_floor}"
           f"({h.x},{h.y}) HP={h.hp} ATK={h.atk} DEF={h.def_}")
@@ -137,6 +157,8 @@ def main():
     # grind 损血落差」，即盾/剑势能值的【真实数据来源】（守铁律：从塔数据真算，不硬塞「盾优先」权重）。
     roster = build_future_roster(start)
     beam_future = FutureCfg(roster, args.lam) if args.lam else None
+    if args.score == "vzone":
+        beam_future = None     # V_zone 替换式打分时区势能旁路（score_override 优先）；下方 roster 标定仅作减伤数据参照
 
     def far(datk=0, ddef=0):
         s2 = _copy_state(start)
@@ -179,7 +201,7 @@ def main():
                                            actions, value_vector(stt))
         first_wave_reach.setdefault(stt.current_floor, len(actions))
 
-    cut_path = OUT / f"crossbeam_cut_K{args.beam}_lam{args.lam}_{args.diversity}.jsonl"
+    cut_path = OUT / f"crossbeam_cut_K{args.beam}{score_tag}_lam{args.lam}_{args.diversity}.jsonl"
     fh = cut_path.open("w", encoding="utf-8")
     n_cut_written = [0]
 
@@ -191,7 +213,8 @@ def main():
     t0 = time.perf_counter()
     res = search_quotient(start, goal_cell, step, max_states=args.cap, cross_floor=True,
                           beam_k=args.beam, beam_cut_sink=sink, on_admit=on_admit,
-                          beam_future=beam_future, beam_diversity=beam_diversity)
+                          beam_future=beam_future, beam_diversity=beam_diversity,
+                          beam_score_fn=beam_score_fn)
     dt = time.perf_counter() - t0
     fh.close()
 
@@ -313,7 +336,7 @@ def main():
               f"（注：route 已通关、这些是中途态，仅作属性优势信号，全程通关价值需玩家终审）：")
         for fid, vec4, actions, valvec in sorted(dominators, key=lambda t: -t[1][0])[:5]:
             print(f"    {fid} HP={vec4[0]} ATK={vec4[1]} DEF={vec4[2]} ({len(actions)}步)")
-        dom_path = OUT / f"crossbeam_dominators_K{args.beam}_lam{args.lam}_{args.diversity}.jsonl"
+        dom_path = OUT / f"crossbeam_dominators_K{args.beam}{score_tag}_lam{args.lam}_{args.diversity}.jsonl"
         with dom_path.open("w", encoding="utf-8") as dfh:
             for fid, vec4, actions, valvec in dominators:
                 dfh.write(json.dumps({"floor": fid, "hp": vec4[0], "atk": vec4[1],
