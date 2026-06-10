@@ -5,6 +5,33 @@
 
 ---
 
+## 🟢 工作区两条线分提交 + 钥匙荒/早换五方案落盘（P 已实现验证、③ 为下一步）（2026-06-10）
+
+> 上一会话把"P 购买能力"实现并验完零回归就停了（符合"一次只动一个变量"），但改动一直未提交、五方案也只活在对话里没落盘。本次把工作区**拆成两条独立线分别提交**，并把方案状态写进文档，免得下次对不上。
+
+### 两个 commit（线分清、零回归全绿）
+
+- **commit `5e319a8`（线A：V_zone 前置1）** — `_killable` 解耦"可杀性"与"节点身份"：带 afterBattle/arrive 事件的怪**仍可杀**（先死后触发语义），节点身份由 `_is_free_tile` 单独保住。结构性修复 MT10 骷髅队长"打不动"误判。含配套单测 `tests/test_quotient_killable_hooks.py`（7 例）+ V_zone 全量接入前置1（`extract/vzone.py` 前置2 修 + `probe_crossfloor_beam.py` 注入 `beam_score_fn`）。
+- **commit `fb4b5e3`（线B：P 购买能力）** — `allow_purchase` 开关 + `_resolve_choices`：搜索可买商人钥匙/祭坛属性，"祭坛买几次"靠 Pareto+beam 自收敛（非硬编码）。**默认关 = 字节级零回归**（`allow_purchase=False` 与 P 前 HEAD 一致，已用 `verify_p_purchase.py` 实测）；开启后 reach MT8→MT9。
+- **零回归**：`pytest tests/` **100 passed**（含 46 检查点、MT33/MT38 单向阀、killable_hooks）。两条线分提交后 `git status` 仅余未跟踪临时产物，无已跟踪文件残留改动。
+
+### 钥匙荒 / 早换 五方案状态（落盘，免得只活在对话里）
+
+| 方案 | 内容 | 状态 |
+|---|---|---|
+| **P** | 补购买能力（商人钥匙 / 祭坛属性，付代价算子） | ✅ **已实现验证**，commit `fb4b5e3` |
+| **K** | 钥匙保护口径改 boss 路径（保护维度对齐"打过本区 boss") | ⬜ 待做 |
+| **③** | 钥匙期权项 Φ_key（把"手里钥匙"折算成势能） | ⬜ 待做，**玩家下一步**；Φ_key 估值口径**待玩家拍板**，未定不预设（铁律：优化偏好不写死规则） |
+| **H1** | D 预见涨属性（启发里前瞻"换了装备后损血会降"） | ⬜ 待做 |
+| **H2** | 没拿资源的期权值（未取道具/钥匙的潜在价值） | ⬜ 待做 |
+
+### 前置状态订正（line-8 旧标"前置2待修"已部分过时）
+
+- **前置1** ✅ 已修，commit `5e319a8`（见上）。
+- **前置2**（boss 层 V_zone 退化修：D 指向 boss 格而非"该层任意格"）：**代码已落地**（`extract/vzone.py` 里 `BOSS_FLOOR/BOSS_CELL/BOSS_FLAG` + `boss_cell_live/live_shortest_toll/v_zone`），且**已随 commit `5e319a8` 提交**。但**端到端全量接入验证未在本会话复核**——下次接入时需重跑确认，勿当已验完。
+
+---
+
 ## 🟢 V_zone(区势能启发) 验证 A/B/C/D 全过 + 纯V_zone独立缓解Q2砍谷底(分坑零贡献) + 全量接入【前置1已修✅/前置2待修】（2026-06-09）
 
 > `V_zone = HP − D`，D=当前格→MT10 boss 的最短损血路（admissible 下界）。在 `extract/` 隔离脚本里全程验完（**零碰 solver 核心**：复用展开原语 `_absorb/_boundary_ops/_expand_op/_qfp` + `beam.beam_select`，唯一变量是把 score 换成 V_zone）。结论：**纯 V_zone 自己诱导出延迟交战**（MT3 裸攻态 wave15 自主搜到去 MT5 拿铁剑），且**面对 MT10 埋伏硬必杀段不怯战**（连杀 8/8）。怯战 caveat 排除、动态 kill-neutral cache **不为此做**。但 D 测顺带挖出全量接入的**两个硬前置**。
