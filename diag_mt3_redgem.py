@@ -29,11 +29,11 @@ hero = HeroState(
 state = GameState(hero=hero, floors={'MT1': floor}, current_floor='MT1',
     floor_ids=FLOOR_IDS, visited_floors={'MT1'}, pending_floor_change=None, _floors_dir=FLOORS)
 
-# 快进到 token[81]
-for tok in tokens[:82]:
+# 快进到 token[82]（MT2(1,9)小偷 hide 抑制修法后，进 MT3 前缀 82→83）
+for tok in tokens[:83]:
     state = step(state, tok)
 
-print(f"token[81] 结束: floor={state.current_floor} pos=({state.hero.x},{state.hero.y}) "
+print(f"token[82] 结束: floor={state.current_floor} pos=({state.hero.x},{state.hero.y}) "
       f"hp={state.hero.hp} atk={state.hero.atk} def={state.hero.def_}")
 
 # MT3 상태 확인

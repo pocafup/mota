@@ -77,7 +77,7 @@ class FloorState:
     _tile_to_entity: dict        # {tile_int: entity_id} (enemies + items + npcs)
     _id_to_tile: dict            # {entity_id: tile_int}
     _tile_to_common_event: dict  # {tile_int: common_event_name} for NPC tiles
-    _suppressed_events: set  # loc keys where hide+remove fired; also autoEvent once-keys
+    _suppressed_events: set  # loc keys where hide+remove fired, or any no-loc hide (hides own trigger cell); also autoEvent once-keys
     _done_after_battle: set  # loc keys where afterBattle already ran
     # 拦截型事件状态
     _event_intercepting: bool = False
@@ -1584,9 +1584,12 @@ def _execute_instruction(
                         floor.terrain[ly][lx] = 0
                 floor.entities[ly][lx] = 0   # 清除实体（NPC/怪/道具）
         else:
-            if instr.get("remove"):
-                floor._suppressed_events.add(f"{event_x},{event_y}")
-            floor.entities[event_y][event_x] = 0  # 无 loc 时清除事件触发格实体
+            # 无 loc 的 hide = 隐藏自己的触发格。网站"hide 移除触发块、再踏不触发"，
+            # 故无条件登记抑制（不止 remove 时）——否则二次踩触发格会 re-fire 整段事件，
+            # 把已被同段 move 搬走的实体（如 MT2 越狱小偷 (3,7)→(1,9)）错误清掉。
+            # 玩家网站实测兜底：再踏 (3,7) 后 (1,9) 小偷仍在。
+            floor._suppressed_events.add(f"{event_x},{event_y}")
+            floor.entities[event_y][event_x] = 0  # 清除事件触发格实体
         return
 
     # ── setBlock ──────────────────────────────────────────────────────────────
@@ -1746,8 +1749,14 @@ def _execute_instruction(
     if t in ("move", "generateMove"):
         loc = instr.get("loc")
         if loc is None:
-            return
-        sx, sy = loc[0], loc[1]
+            # 无 loc：以触发事件的格子(event_x,event_y)为移动起点（引擎语义——
+            # move 默认搬运触发该事件的那个实体）。复现 MT2 小偷链：
+            # (3,7)越狱小偷 move keep [left:2,down:2]→搬到(1,9)挡路；
+            # (1,9)提示小偷 move [down:2]+hide→英雄撞上后小偷下移消失开路。
+            # 全塔仅 3 处无 loc move(MT2×2+MT35×1)，均为格触发事件、坐标有效。
+            sx, sy = event_x, event_y
+        else:
+            sx, sy = loc[0], loc[1]
         dx, dy = sx, sy
         for s in instr.get("steps", []):
             d, cnt = s.split(":")
@@ -1771,6 +1780,12 @@ def _execute_instruction(
         cols = len(floor.terrain[0]) if rows else 0
         if instr.get("keep") is True and 0 <= dy < rows and 0 <= dx < cols:
             floor.entities[dy][dx] = tile_id
+            # 带事件的实体被 keep-move 到某格→激活该格事件挡路（复现 MT2 小偷搬到
+            # (1,9) 后挡路对话）；搬空(tile_id=0)→事件复归休眠。仅作用于 keep-move
+            # 落点且该格事件本身带 enable 字段，不碰 MT1 那些从不被 move 的装饰 NPC。
+            dest_ev = floor.events.get(f"{dx},{dy}")
+            if isinstance(dest_ev, dict) and "enable" in dest_ev:
+                dest_ev["enable"] = (tile_id != 0)
         return
 
     # ── if ────────────────────────────────────────────────────────────────────

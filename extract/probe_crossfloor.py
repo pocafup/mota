@@ -34,7 +34,8 @@ def _fidx(fid):
     return int(m.group(1)) if m else 1_000_000
 
 
-OPENING_PREFIX = 82   # tokens[:82] = 强制开局噩梦序列结束、落 MT3 seg4 入口（与 verify_mt3 同口径）
+OPENING_PREFIX = 83   # tokens[:83] = 强制开局噩梦序列结束、落 MT3 seg4 入口（与 verify_mt3 同口径）
+#                       82→83：MT2(1,9) 小偷 hide 抑制修法后，再踏(3,7)不再清(1,9)小偷，英雄正确多停一步
 
 
 def build_start():
@@ -43,7 +44,7 @@ def build_start():
     开局噩梦(MT3→MT2，flag:03 一次性)会 setValue hp=400/atk=10/def=10、清武器盾、是不可路由的
     剧情过场(floor_graph.md §5)。它【之前】英雄是 hp1000/atk100/def100 的过场态，搜索一旦踩噩梦触发格
     就被合法地裁掉(非 stair 离层)→ 困在开局。真正的自由博弈从噩梦【之后】的 MT3 入口开始(hp400/atk10/
-    def10)，与 verify_mt3 的 PREFIX=82、phase1 seg4 起点同口径。施加 tokens[:82] 只是穿过【强制】开局
+    def10)，与 verify_mt3 的 PREFIX=83、phase1 seg4 起点同口径。施加 tokens[:83] 只是穿过【强制】开局
     (无博弈自由度)抵达首个可玩态——不是模仿 route 走法(此后搜索自由跨层、不抄 route)。
     跨层须多层安全深拷 → _single_floor_copy=False。"""
     state = build_initial_state()

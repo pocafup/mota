@@ -26,7 +26,7 @@ from sim.simulator import (step, _auto_combat_result, _build_monster,
                            WALL_TILES, SPECIAL_DOOR, AUTO_OPEN_TILES, DOOR_KEY_MAP)
 from sim.combat import PlayerState, compute_combat
 
-MT3_ENTRY_TOKEN = 82   # analyze: seg3 forced D@81 ⟶换层；tokens[:82] 执行完即在 MT3 入口
+MT3_ENTRY_TOKEN = 83   # analyze: tokens[:83] 执行完即在 MT3 入口（82→83：MT2(1,9)小偷 hide 抑制修法后多停一步）
 
 
 def reach_mt3_entry():

@@ -24,7 +24,7 @@ from solver.quotient import search_quotient, _free_cells, _boundary_ops
 from solver.verify import replay
 
 GOAL = ("MT3", 11, 5)
-PREFIX = 82   # tokens[:82] → MT3 seg4 入口
+PREFIX = 83   # tokens[:83] → MT3 seg4 入口（82→83：MT2(1,9)小偷 hide 抑制修法后英雄正确多停一步）
 
 
 def mt3_entry(single_floor=False):
