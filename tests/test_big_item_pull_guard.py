@@ -31,7 +31,7 @@ from solver.quotient import value_vector, search_quotient
 from solver.beam import (build_future_roster, FutureCfg, _future_potential,
                          score_points, equiv_hp_over_roster, region_reference)
 from vzone import build_zone, BOSS_FLAG, _zone_attr_gems
-from big_item_pull import detect_big_items, pull_big
+from big_item_pull import detect_big_items, pull_big, build_pickup_bonus, pickup_bonus
 
 LAM = 0.2                                   # 甜区 λ（路径B 验证结论），结合基分用它
 _SCALAR_KEYS = {"hp", "atk", "def", "mdef", "gold", "kill"}
@@ -241,3 +241,115 @@ def test_acquire_realizes_value_and_pull_vanishes(zone, roster, big, battery):
     assert exercised >= 1, "命门③未覆盖任何可达大件态（电池组/检测口径漂移？）"
     print(f"\n[命门③] 覆盖 {exercised} 个可达大件态；min β_crit={crit_min:.2f}"
           f"（β_big < {crit_min:.2f} 时拿起恒严格优于守着→不复发 κ=1）")
+
+
+# ───────────────── 命门④：满额兑现拿取奖励 G（build_pickup_bonus / pickup_bonus）─────────────────
+# 玩家 2026-06-11 拍板【满额兑现】治就近病：拿走时补 G=β·ΔRP₀(满额) ≥ 在场守着引导 β·ΔRP/(1+dist)(折扣)，
+# 结构性保证拿走≥守着、不靠调参。小宝石只给拿取奖励(无在场 pull)→无平台、无就近病风险。
+# 本组钉死：①β=0→G≡0 字节零回归；②G 纯只读不进 value_vector；③拿到才兑现(κ=1 免疫)；④满额≥守着(结构性)。
+
+def test_pickup_bonus_zero_beta_is_empty(big, battery):
+    """命门④-①（字节零回归）：β_big=β_small=0 → 拿取奖励表为空 → pickup_bonus 恒 0（G 关时绝不引入任何项）。"""
+    cells, ranked = big["cells"], big["ranked"]
+    assert build_pickup_bonus(ranked, cells, 0.0, 0.0) == {}, "β_big=β_small=0 拿取奖励表非空（破坏字节零回归）"
+    for s in battery:
+        assert pickup_bonus(s, {}) == 0.0, f"空表 pickup_bonus 非 0(floor={s.current_floor})"
+        assert pickup_bonus(s, build_pickup_bonus(ranked, cells, 0.0, 0.0)) == 0.0, "β=0 拿取奖励非 0"
+
+
+def test_build_pickup_bonus_uses_ref_drp_constants(big):
+    """命门④（数据涌现·满额常数）：表值恰为 β·ΔRP₀(detect_big_items 参照态固定常数)；大件用 β_big、小宝石用 β_small；
+    ΔRP₀≤0 不入表。证 G 用涌现常数、不硬编码，且大/小是【两个独立旋钮】。"""
+    cells, ranked = big["cells"], big["ranked"]
+    drp0 = {c: v for v, c, _, _ in ranked}
+    bb, bs = 25.0, 3.0
+    table = build_pickup_bonus(ranked, cells, bb, bs)
+    for v, cell, da, dd in ranked:
+        if v <= 0:
+            assert cell not in table, f"ΔRP₀≤0 的格不该入表：{cell}"
+            continue
+        beta = bb if cell in cells else bs
+        assert table[cell] == pytest.approx(beta * drp0[cell]), f"拿取奖励 ≠ β·ΔRP₀：{cell}"
+    # 独立旋钮：只开 β_big → 表里只有大件；只开 β_small → 表里没有大件
+    only_big = build_pickup_bonus(ranked, cells, bb, 0.0)
+    assert set(only_big) <= cells, "β_small=0 时小宝石不该入表"
+    only_small = build_pickup_bonus(ranked, cells, 0.0, bs)
+    assert not (set(only_small) & cells), "β_big=0 时大件不该入表"
+
+
+def test_pickup_bonus_only_counts_taken(big, battery):
+    """命门④-③（拿到才兑现）：pickup_bonus 恰为 Σ_{表内·已拿走(entities==0)} 表值（未加载/在场格一律不计）。"""
+    cells, ranked = big["cells"], big["ranked"]
+    table = build_pickup_bonus(ranked, cells, 25.0, 3.0)
+    for s in battery:
+        expect = 0.0
+        for cell, bonus in table.items():
+            gfid, x, y = cell
+            fl = s.floors.get(gfid)
+            if fl is not None and fl.entities[y][x] == 0:
+                expect += bonus
+        assert pickup_bonus(s, table) == pytest.approx(expect), \
+            f"pickup_bonus ≠ Σ已拿走(floor={s.current_floor})"
+
+
+def test_pickup_bonus_realized_only_on_take(zone, big, battery):
+    """命门④-③（κ=1 免疫·拿起才翻开）：对每个【在场】表内格，模拟拿起（实体离场）后 pickup_bonus 恰好 +表值；
+    在场时该格贡献 0（没拿不给）→ 天然不犯 κ=1（不会悬而不拿被奖励）。遵铁律：离场=真置 entities 0、不手算。"""
+    cells, ranked = big["cells"], big["ranked"]
+    table = build_pickup_bonus(ranked, cells, 25.0, 3.0)
+    exercised = 0
+    for s in battery:
+        for cell in table:
+            gfid, x, y = cell
+            fl = s.floors.get(gfid)
+            if fl is None or fl.entities[y][x] == 0:
+                continue                            # 未加载/已拿走 → 无法模拟离场，跳过
+            before = pickup_bonus(s, table)
+            g = _copy_state(s)
+            g.floors[gfid].entities[y][x] = 0       # 引擎拾取：实体离场
+            after = pickup_bonus(g, table)
+            assert after == pytest.approx(before + table[cell]), \
+                f"拿起才兑现失败：{cell} 应 +{table[cell]:.0f}(floor={s.current_floor})"
+            exercised += 1
+    assert exercised >= 1, "命门④-③未覆盖任何可拿取格（电池组/检测口径漂移？）"
+
+
+def test_pickup_bonus_does_not_mutate(zone, big, battery):
+    """命门④-②（纯只读·不进剪枝维）：调 build_pickup_bonus / pickup_bonus 绝不改 value_vector 或 hero 任何字段。"""
+    table = build_pickup_bonus(big["ranked"], big["cells"], 25.0, 3.0)
+    hero_scalars = ("hp", "atk", "def_", "mdef", "gold", "x", "y", "kill_count")
+    for s in battery:
+        before_vv = dict(value_vector(s))
+        before_scalars = {a: getattr(s.hero, a) for a in hero_scalars}
+        pickup_bonus(s, table)
+        assert dict(value_vector(s)) == before_vv, f"pickup_bonus 改了 value_vector(floor={s.current_floor})"
+        assert {a: getattr(s.hero, a) for a in hero_scalars} == before_scalars, \
+            f"pickup_bonus 改了 hero 标量(floor={s.current_floor})"
+
+
+def test_full_realization_dominates_guarding_pull(zone, roster, big, battery):
+    """命门④-④（满额兑现【结构性】压过守着，直对玩家口径 满额β·ΔRP₀ ≥ 守着β·ΔRP/(1+dist)）：
+    对每个【在场·够得到】大件，拿取奖励 table[cell]=β·ΔRP₀ ≥ 守着引导 β·pull_big({cell})=β·ΔRP(当前)/(1+dist)。
+    ΔRP₀(参照态最弱)是当前 ΔRP 的上界 → 不等式【结构成立·非阈值】→ 拿走(满额)恒压守着(折扣)，再叠区势能兑现 λ·ΔRP>0
+    → 拿走严格优于守着、对【任意 β】成立(无 β 上限)→ 治就近病。比值 β 无关(两侧同乘 β)，用 β=1 直比。报告 min(满额/守着)。"""
+    beta = 1.0
+    table = build_pickup_bonus(big["ranked"], big["cells"], beta, 0.0)
+    exercised = 0
+    min_ratio = float("inf")
+    for s in battery:
+        for cell in big["cells"]:
+            gfid, x, y = cell
+            fl = s.floors.get(gfid)
+            if fl is None or fl.entities[y][x] == 0:
+                continue
+            guard = beta * pull_big(zone, roster, s, {cell})   # β·ΔRP(当前)/(1+dist)（守着折扣引导）
+            if guard <= 0.0:
+                continue                                       # 够不到 → 门控 0、无就近病风险
+            take = table[cell]                                 # β·ΔRP₀（满额拿取）
+            assert take >= guard - 1e-6, \
+                f"满额兑现未压过守着：{cell} 满额={take:.0f} < 守着={guard:.0f}(floor={s.current_floor})"
+            min_ratio = min(min_ratio, take / guard)
+            exercised += 1
+    assert exercised >= 1, "命门④-④未覆盖任何在场够得到的大件态（电池组/检测口径漂移？）"
+    print(f"\n[满额兑现] 覆盖 {exercised} 态；min(满额 β·ΔRP₀ / 守着 β·ΔRP/(1+dist))={min_ratio:.2f}"
+          f"（≥1 → 拿走结构性压过守着、任意 β 无上限、治就近病）")

@@ -128,10 +128,16 @@ def main():
     ap.add_argument("--beta-big", type=float, default=0.0,
                     help="【结合】大件 pull 引导系数 β_big（仅 --score region 生效，玩家 2026-06-11）："
                          "0=关(纯 region 区势能基分，与原版字节一致=零回归基线)；"
-                         ">0=开(排序键=region 区势能基分(兑现侧) + β_big·pull_大件(引导侧))。pull_大件 只对"
+                         ">0=开(排序键=region 区势能基分(兑现侧) + β_big·pull_大件(引导侧) + β_big·ΔRP₀(大件已拿走))。pull_大件 只对"
                          "【ΔRP 减伤量涌现出的大件】(剑盾,数据自动找缝、不硬编码)给'去拿它'梯度，治剑盾误判；"
-                         "拿到即离场→pull 归 0、区势能兑现跃升远大于守着引导→不复发 κ=1。只进 beam_score_extra"
+                         "拿到即离场→pull 归 0、但满额兑现 G 补 β_big·ΔRP₀(≥守着引导)→结构性拿走≥守着、不复发 κ=1/就近病。只进 beam_score_extra"
                          "排序键，绝不进 D/value_vector(守红线，单测钉死)。一次只动 β_big 一个变量")
+    ap.add_argument("--beta-small", type=float, default=0.0,
+                    help="【满额兑现】小宝石拿取奖励系数 β_small（仅 --score region 生效，玩家 2026-06-11）："
+                         "0=关(小宝石不给引导、纯走 region 兑现侧，零回归)；"
+                         ">0=开(小宝石【已拿走·entities==0】才给 β_small·ΔRP₀(g)，【只拿取奖励、无在场 pull】→无平台、无就近病风险)。"
+                         "小宝石不在 big_cells、不进 pull_大件；ΔRP₀ 由 detect_big_items 数据涌现。只进 beam_score_extra，"
+                         "绝不进 D/value_vector(守红线)。与 β_big 独立、一次只扫一个变量")
     args = ap.parse_args()
     beam_diversity = None if args.diversity == "none" else args.diversity
     goal_cell = (args.goal_floor, 1, 1)
@@ -140,6 +146,8 @@ def main():
         score_tag += f"_b{args.beta:g}"
     if args.score == "region" and args.beta_big:
         score_tag += f"_bb{args.beta_big:g}"
+    if args.score == "region" and args.beta_small:
+        score_tag += f"_bs{args.beta_small:g}"
 
     # ── V_zone 替换式打分（仅 --score vzone 时注入）：塔特有 zone（含 MT10 boss）在驱动层 extract/ 构建、
     #    闭包持有；solver 只收一个 state→数值 闭包、不 import 任何塔特有模块（塔无关铁律）。score_override 优先于 roster。
@@ -192,22 +200,30 @@ def main():
     # ── 【结合】大件 pull 引导（仅 --score region + β_big>0）：region 区势能基分(兑现侧) + β_big·pull_大件(引导侧)。
     #    大件由 ΔRP 减伤量【数据涌现】（detect_big_items 找最大乘性缝、不硬编码"剑盾"）；只进 beam_score_extra 排序键，
     #    绝不进 D/value_vector（守红线）。塔特有 zone/大件判据在驱动层闭包，solver 只收 state→数值 不 import。
-    if args.score == "region" and args.beta_big:
-        from big_item_pull import detect_big_items, pull_big
+    if args.score == "region" and (args.beta_big or args.beta_small):
+        from big_item_pull import detect_big_items, pull_big, build_pickup_bonus, pickup_bonus
         from vzone import build_zone as _build_zone_bb
         _bb_zone = _build_zone_bb()
         _big_cells, _tau, _ranked = detect_big_items(_bb_zone, roster, start)
         _beta_big = args.beta_big
-        print(f"【结合】大件涌现（ΔRP 最大乘性缝，不硬编码）：τ={_tau:,.0f}  大件 {len(_big_cells)} 件：")
+        _beta_small = args.beta_small
+        # 满额兑现拿取奖励表（ΔRP₀ 参照态固定常数·数据涌现）：大件→β_big·ΔRP₀、小宝石→β_small·ΔRP₀（拿走才兑现）。
+        _bonus_table = build_pickup_bonus(_ranked, _big_cells, _beta_big, _beta_small)
+        print(f"【结合】大件涌现（ΔRP 最大乘性缝，不硬编码）：τ={_tau:,.0f}  大件 {len(_big_cells)} 件  "
+              f"β_big={_beta_big:g} β_small={_beta_small:g}  拿取奖励表 {len(_bonus_table)} 格：")
         for drp, cell, da, dd in _ranked:
             mark = "★大件" if cell in _big_cells else "  小宝石"
-            print(f"    {mark} {cell[0]}({cell[1]},{cell[2]}) +atk{da}/+def{dd}  ΔRP={drp:,.0f}")
-        _bb_memo = {}                       # id(state)->(state_ref, pull)：beam_select 每点多次调 score_fn，
+            g = _bonus_table.get(cell)
+            gtag = f"  G拿取={g:,.0f}" if g else ""
+            print(f"    {mark} {cell[0]}({cell[1]},{cell[2]}) +atk{da}/+def{dd}  ΔRP={drp:,.0f}{gtag}")
+        _bb_memo = {}                       # id(state)->(state_ref, extra)：beam_select 每点多次调 score_fn，
         def beam_score_extra(s):            # pull_big 每调跑一次全图 Dijkstra；按对象 memo（拿光大件后早退近零成本）
             hit = _bb_memo.get(id(s))
             if hit is not None and hit[0] is s:
                 return hit[1]
-            v = _beta_big * pull_big(_bb_zone, roster, s, _big_cells)
+            # 引导侧 = β_big·pull_大件(在场折扣引导) + G(满额兑现拿取奖励，大件+小宝石已拿走)。
+            v = _beta_big * pull_big(_bb_zone, roster, s, _big_cells) if _beta_big else 0.0
+            v += pickup_bonus(s, _bonus_table)
             _bb_memo[id(s)] = (s, v)
             return v
 

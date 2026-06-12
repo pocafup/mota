@@ -110,3 +110,37 @@ def pull_big(zone, roster, state, big_cells):
             continue
         total += drp / (1.0 + d)
     return total
+
+
+def build_pickup_bonus(ranked, big_cells, beta_big, beta_small):
+    """【满额兑现·拿取奖励表】把 detect_big_items 的 ranked(ΔRP₀ 参照态固定常数·数据涌现)折成 {cell: 拿到即加常数}。
+      · 大件(cell∈big_cells)：β_big·ΔRP₀(g)。   · 小宝石(其余·ΔRP₀>0)：β_small·ΔRP₀(g)。
+    满额兑现形式：拿走时给【满额】β·ΔRP₀，而在场只给【折扣】β·ΔRP(当前)/(1+dist)；ΔRP₀(参照态·最弱)是当前 ΔRP 的上界
+    ⇒ 拾取兑现 β·ΔRP₀ ≥ 守着引导 β·ΔRP/(1+dist)，单调不降、结构性保证【拿走≥守着】——不靠调参、不犯就近病/κ=1。
+    红线：β=0 → 空表 → G≡0 字节零回归。塔无关：只认 ΔRP 减伤量、不认物品 id/名。"""
+    table = {}
+    for (drp, cell, da, dd) in ranked:
+        if drp <= 0:
+            continue                               # 无减伤 → 不奖励（与 pull_big 同口径）
+        beta = beta_big if cell in big_cells else beta_small
+        if beta <= 0:
+            continue                               # β=0 → 不入表（空表=字节零回归）
+        table[cell] = beta * drp
+    return table
+
+
+def pickup_bonus(state, bonus_table):
+    """【拿取奖励 G(state)】≥0：Σ_{cell∈bonus_table·已拿走(entities==0)} bonus_table[cell]。
+    '已拿走' 用现成 entities==0 判定（与 pull_big 离场判定同口径；floor 未加载=没拿、不给）。
+    拿到才兑现 → 天然不犯 κ=1（没拿不给、拿了即满额）；空表 → 0（字节零回归）。
+    只进 beam 排序键、绝不进 value_vector/D（红线）。"""
+    if not bonus_table:
+        return 0.0
+    floors = state.floors
+    total = 0.0
+    for (cell, bonus) in bonus_table.items():
+        gfid, x, y = cell
+        fl = floors.get(gfid)
+        if fl is not None and fl.entities[y][x] == 0:
+            total += bonus                         # 已拿走 → 满额兑现
+    return total
