@@ -86,14 +86,17 @@ def _build_roster(points):
     return roster
 
 
-def score_points(points, future=None):
+def score_points(points, future=None, extra=None):
     """【单遍打分】构建 R 后，对每点只算一次「对 R 各怪损血」，分类缓存 (Σ可杀损血, 打不动计数)；
-    全批扫完得 BIG=最大可杀单怪损血，再算每点 V=hp−Σ可杀−打不动×BIG−远区势能。返回 (roster,
+    全批扫完得 BIG=最大可杀单怪损血，再算每点 V=hp−Σ可杀−打不动×BIG−远区势能(+引导项)。返回 (roster,
     big, scores)，scores: id(state)→V。每 (点,怪) 对仅一次引擎战斗——消掉旧版 region_reference(算BIG)
     + equiv_hp_over_roster(重算V) 的双遍 compute_combat（段间前沿上万点 × R 时是主成本）。
     与双遍版数学等价：Σcost = Σ可杀损血 + 打不动×BIG，BIG 取同一可杀集最大值。
     future（FutureCfg 或 None）：区势能 cfg。None/lam=0 → _future_potential 返回 0（int）→ 与
-    原版【字节一致】（off 路径不引入 float）。on 时 V 再减 λ·Σ_区·存活 toll，见 _future_potential。"""
+    原版【字节一致】（off 路径不引入 float）。on 时 V 再减 λ·Σ_区·存活 toll，见 _future_potential。
+    extra（可调用 state→数值 或 None）：驱动层注入的【可加引导项】(如 β_big·pull_大件)，只进此排序键、
+    绝不进 value_vector/D。None（默认）→ 不加、与原版【字节一致】（off 路径不引入任何项）；给函数 →
+    每点 V 再【加】extra(state)。塔无关：solver 不认 extra 内部逻辑（闭包持塔特有 zone 在驱动层 extract/）。"""
     roster = _build_roster(points)
     mids = list(roster.values())
     big = 0
@@ -110,8 +113,12 @@ def score_points(points, future=None):
             else:
                 uk += 1
         rows.append((id(p.state), p.state, hp, sk, uk))
-    scores = {sid: hp - sk - uk * big - _future_potential(st, future)
-              for (sid, st, hp, sk, uk) in rows}
+    if extra is None:
+        scores = {sid: hp - sk - uk * big - _future_potential(st, future)
+                  for (sid, st, hp, sk, uk) in rows}
+    else:
+        scores = {sid: hp - sk - uk * big - _future_potential(st, future) + extra(st)
+                  for (sid, st, hp, sk, uk) in rows}
     return roster, big, scores
 
 
@@ -129,17 +136,19 @@ def region_reference(points):
     return roster, big
 
 
-def equiv_hp_over_roster(state, roster, big, future=None):
-    """V 标量 = HP − Σ_{m∈R} cost(m) − 远区势能。cost = 可杀(损血<HP)→损血；打不动/会被打死→BIG。
+def equiv_hp_over_roster(state, roster, big, future=None, extra=None):
+    """V 标量 = HP − Σ_{m∈R} cost(m) − 远区势能(+引导项)。cost = 可杀(损血<HP)→损血；打不动/会被打死→BIG。
     越大越优；R 固定 → 对杀怪中性；跨防御阈值时 cost 由 BIG 降到实际损血 → V 跳升。
     这是 beam 排序的【唯一】打分键（钥匙 / 道具 / 血瓶不进，走保护维 / 身份维）。
-    future=None → 区势能项=0（int）→ 与原版字节一致；on 时再减 λ·Σ_区·存活 toll（见 _future_potential）。"""
+    future=None → 区势能项=0（int）→ 与原版字节一致；on 时再减 λ·Σ_区·存活 toll（见 _future_potential）。
+    extra=None → 不加引导项、与原版字节一致；给函数 → 再加 extra(state)（口径同 score_points，只进排序键）。"""
     hp = state.hero.hp
     total = 0
     for mid in roster.values():
         d = _combat_damage(state, mid)
         total += d if (d is not None and d < hp) else big
-    return hp - total - _future_potential(state, future)
+    base = hp - total - _future_potential(state, future)
+    return base if extra is None else base + extra(state)
 
 
 # ─── 区势能（永久属性对【当前区·剩余存活怪】的总减伤；玩家 2026-06-08 时序性裁定）──────────

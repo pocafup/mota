@@ -119,32 +119,61 @@ def main():
     ap.add_argument("--score", default="region", choices=["region", "vzone"],
                     help="beam 打分键：region=原区势能/roster（默认，λ 控；λ=0 与原版字节一致=零回归基线）；"
                          "vzone=V_zone=HP−D 替换式打分（前置2 修好的 live boss 梯度，注入 beam_score_fn 旁路 roster）")
+    ap.add_argument("--beta", type=float, default=0.0,
+                    help="目标导向 pull 引导系数 β（仅 --score vzone 生效，弃 κ 势能形后的新方向，玩家 2026-06-10）："
+                         "0=关(beam_rank_score 退回纯 HP−D_free，与 β=0/κ=0 字节零回归，单测硬保证)；"
+                         ">0=开(排序键=HP−D_free + β·pull；pull=朝可达高区势能下降攻防道具的引导，拿走离场、够不到门控0；"
+                         "只进 beam score_override，绝不进 D/value_vector—— 防 κ=1 反向病，命门单测钉死)。"
+                         "β>0 时基分恒用 κ=0（pull 取代 κ，一次只动 β 一个变量）")
+    ap.add_argument("--beta-big", type=float, default=0.0,
+                    help="【结合】大件 pull 引导系数 β_big（仅 --score region 生效，玩家 2026-06-11）："
+                         "0=关(纯 region 区势能基分，与原版字节一致=零回归基线)；"
+                         ">0=开(排序键=region 区势能基分(兑现侧) + β_big·pull_大件(引导侧))。pull_大件 只对"
+                         "【ΔRP 减伤量涌现出的大件】(剑盾,数据自动找缝、不硬编码)给'去拿它'梯度，治剑盾误判；"
+                         "拿到即离场→pull 归 0、区势能兑现跃升远大于守着引导→不复发 κ=1。只进 beam_score_extra"
+                         "排序键，绝不进 D/value_vector(守红线，单测钉死)。一次只动 β_big 一个变量")
     args = ap.parse_args()
     beam_diversity = None if args.diversity == "none" else args.diversity
     goal_cell = (args.goal_floor, 1, 1)
     score_tag = "" if args.score == "region" else f"_{args.score}"
+    if args.score == "vzone" and args.beta:
+        score_tag += f"_b{args.beta:g}"
+    if args.score == "region" and args.beta_big:
+        score_tag += f"_bb{args.beta_big:g}"
 
     # ── V_zone 替换式打分（仅 --score vzone 时注入）：塔特有 zone（含 MT10 boss）在驱动层 extract/ 构建、
     #    闭包持有；solver 只收一个 state→数值 闭包、不 import 任何塔特有模块（塔无关铁律）。score_override 优先于 roster。
     beam_score_fn = None
+    beam_score_extra = None     # 【结合】大件 pull 引导（仅 region 路；roster 建好后注入，见下方）
     if args.score == "vzone":
-        from vzone import build_zone as _build_zone_vz, v_zone as _v_zone
+        from vzone import (build_zone as _build_zone_vz, v_zone_score as _v_zone_score,
+                           beam_rank_score as _beam_rank_score)
         _vz_zone = _build_zone_vz()
+        _beta = args.beta
         _vz_memo = {}                       # id(state)->(state_ref, score)：beam_select 每点多次调 score_fn，
-        def beam_score_fn(s):               # 而 v_zone 每调一次跑 Dijkstra；按对象 memo（持 ref 防 id 复用，zone-1 规模可控）
+        def beam_score_fn(s):               # 而打分每调一次跑 Dijkstra（pull 再跑一次全图距离）；按对象 memo
             hit = _vz_memo.get(id(s))
             if hit is not None and hit[0] is s:
                 return hit[1]
-            v = _v_zone(_vz_zone, s)[0]      # HP−D 标量；-inf=boss 无路（排最末）
+            if _beta:                       # 目标导向：HP−D_free(κ=0) + β·pull（pull 只进此排序键，不碰 D/value_vector）
+                v = _beam_rank_score(_vz_zone, s, _beta)
+            else:                           # β=0 → 退回纯 HP−D_free（字节零回归基线）；-inf=boss 无路(排最末)
+                v = _v_zone_score(_vz_zone, s)[0]
             _vz_memo[id(s)] = (s, v)
             return v
 
     start, nopen = build_start()
     h = start.hero
     print("=" * 96)
+    if args.score == "vzone":
+        if args.beta:
+            _score_desc = f"V_zone 目标导向=HP−D_free + β·pull(β={args.beta:g})"
+        else:
+            _score_desc = "V_zone=HP−D_free(纯标量β=0,字节零回归)"
+    else:
+        _score_desc = f"区势能/roster λ={args.lam}"
     print(f"跨层楼梯缩点 + beam 控宽 自主爬升检验（cross_floor=True，beam K={args.beam}，"
-          f"打分={'V_zone=HP−D(替换式,前置2 live梯度)' if args.score == 'vzone' else f'区势能/roster λ={args.lam}'}，"
-          f"分坑={args.diversity}，_single_floor_copy=False）")
+          f"打分={_score_desc}，分坑={args.diversity}，_single_floor_copy=False）")
     print("=" * 96)
     print(f"起点(穿过 {nopen} token 强制开局噩梦后首个自由态): {start.current_floor}"
           f"({h.x},{h.y}) HP={h.hp} ATK={h.atk} DEF={h.def_}")
@@ -159,6 +188,28 @@ def main():
     beam_future = FutureCfg(roster, args.lam) if args.lam else None
     if args.score == "vzone":
         beam_future = None     # V_zone 替换式打分时区势能旁路（score_override 优先）；下方 roster 标定仅作减伤数据参照
+
+    # ── 【结合】大件 pull 引导（仅 --score region + β_big>0）：region 区势能基分(兑现侧) + β_big·pull_大件(引导侧)。
+    #    大件由 ΔRP 减伤量【数据涌现】（detect_big_items 找最大乘性缝、不硬编码"剑盾"）；只进 beam_score_extra 排序键，
+    #    绝不进 D/value_vector（守红线）。塔特有 zone/大件判据在驱动层闭包，solver 只收 state→数值 不 import。
+    if args.score == "region" and args.beta_big:
+        from big_item_pull import detect_big_items, pull_big
+        from vzone import build_zone as _build_zone_bb
+        _bb_zone = _build_zone_bb()
+        _big_cells, _tau, _ranked = detect_big_items(_bb_zone, roster, start)
+        _beta_big = args.beta_big
+        print(f"【结合】大件涌现（ΔRP 最大乘性缝，不硬编码）：τ={_tau:,.0f}  大件 {len(_big_cells)} 件：")
+        for drp, cell, da, dd in _ranked:
+            mark = "★大件" if cell in _big_cells else "  小宝石"
+            print(f"    {mark} {cell[0]}({cell[1]},{cell[2]}) +atk{da}/+def{dd}  ΔRP={drp:,.0f}")
+        _bb_memo = {}                       # id(state)->(state_ref, pull)：beam_select 每点多次调 score_fn，
+        def beam_score_extra(s):            # pull_big 每调跑一次全图 Dijkstra；按对象 memo（拿光大件后早退近零成本）
+            hit = _bb_memo.get(id(s))
+            if hit is not None and hit[0] is s:
+                return hit[1]
+            v = _beta_big * pull_big(_bb_zone, roster, s, _big_cells)
+            _bb_memo[id(s)] = (s, v)
+            return v
 
     def far(datk=0, ddef=0):
         s2 = _copy_state(start)
@@ -214,7 +265,7 @@ def main():
     res = search_quotient(start, goal_cell, step, max_states=args.cap, cross_floor=True,
                           beam_k=args.beam, beam_cut_sink=sink, on_admit=on_admit,
                           beam_future=beam_future, beam_diversity=beam_diversity,
-                          beam_score_fn=beam_score_fn)
+                          beam_score_fn=beam_score_fn, beam_score_extra=beam_score_extra)
     dt = time.perf_counter() - t0
     fh.close()
 
@@ -322,6 +373,24 @@ def main():
               + ("✅一致" if ok else f"⚠不一致(重放={rep.current_floor} HP={rep.hero.hp} "
                                      f"ATK={rep.hero.atk} DEF={rep.hero.def_})"))
 
+    # ── ③ Φ_key 信号：各层可达态钥匙留存（κ=0 易"血高钥匙空"；κ>0 应保住到本区 boss 路上要的钥匙）──
+    print("-" * 96)
+    print("③ 钥匙留存（各层 Pareto 前沿：maxHP 态的钥匙 / 前沿内最大总钥匙数）——看 κ 有没有让搜索留住钥匙：")
+
+    def _keys_of(vv):
+        return {k[4:]: v for k, v in vv.items() if k.startswith("key:") and v}
+
+    def _nkeys(vv):
+        return sum(v for k, v in vv.items() if k.startswith("key:"))
+
+    print(f"{'层':>5} {'前沿点':>6} {'maxHP态(hp/钥匙)':>36} {'前沿最大总钥匙':>14}")
+    for fid in sorted(per_floor, key=_fidx):
+        fb = per_floor[fid]
+        mh = fb.max_by(0)
+        mh_str = f"{mh[0][0]}/{_keys_of(mh[2])}" if mh else "—"
+        max_nk = max((_nkeys(vv) for _, _, vv in fb.pts), default=0)
+        print(f"{fid:>5} {len(fb.pts):>6} {mh_str:>36} {max_nk:>14}")
+
     # ── 是否搜出【严格支配 route 末态】的态（HP/ATK/DEF 全≥且≥1 严格）──
     print("-" * 96)
     dominators = []
@@ -340,12 +409,30 @@ def main():
         with dom_path.open("w", encoding="utf-8") as dfh:
             for fid, vec4, actions, valvec in dominators:
                 dfh.write(json.dumps({"floor": fid, "hp": vec4[0], "atk": vec4[1],
-                                      "def": vec4[2], "mdef": vec4[3], "n_steps": len(actions),
+                                      "def": vec4[2], "mdef": vec4[3], "keys": _keys_of(valvec),
+                                      "n_steps": len(actions),
                                       "actions": list(actions)}, ensure_ascii=False) + "\n")
         print(f"  完整动作序列已落盘 → {dom_path.name}（玩家真实游戏终审重放，未喂盾坐标=真自主发现）")
     else:
         print("未发现严格支配 route 末态的中途态（route 末态=通关全程积累，中途态本就难支配；"
               "核心看上面『攻/防超 route 峰』的 ★ 行=是否自主爬升拿到永久属性优势）。")
+
+    # ── 各层【可达最优属性 Pareto】完整落盘（on_admit 累计的 best-reached，含 beam 留存的好态）──
+    # cut 文件只含【被 beam 截掉的 worse 点】，K 大时某层（如 MT10）可能 0 条 → 不可作"最优到达"源。
+    # per_floor 是 on_admit 记的真·可达最优 Pareto(hp/atk/def/mdef)，是下游取 best-MT10 的正确源。
+    # 纯附加产物，不改搜索/打分；行 schema 与 cut 对齐(floor/hp/atk/def/mdef/value/actions)，复用 load_rows。
+    floorbest_path = OUT / f"crossbeam_floorbest_K{args.beam}{score_tag}_lam{args.lam}_{args.diversity}.jsonl"
+    n_fb = 0
+    with floorbest_path.open("w", encoding="utf-8") as ffh:
+        for fid in sorted(per_floor, key=_fidx):
+            for vec4, actions, valvec in per_floor[fid].pts:
+                ffh.write(json.dumps({"floor": fid, "hp": vec4[0], "atk": vec4[1],
+                                      "def": vec4[2], "mdef": vec4[3], "value": valvec,
+                                      "n_steps": len(actions),
+                                      "actions": list(actions)}, ensure_ascii=False) + "\n")
+                n_fb += 1
+    print(f"各层最优 Pareto 完整落盘 → {floorbest_path.name}（{n_fb:,} 条，供下游取 best-MT10；"
+          f"区别于只含截点的 cut 文件）")
 
     print("=" * 96)
 

@@ -384,7 +384,7 @@ _BeamPt = namedtuple("_BeamPt", ["state", "actions"])   # beam_select 只需 .st
 
 
 def _beam_truncate_wave(next_pts, beam_k, st, wave_idx, sink, future=None, diversity_key_fn=None,
-                        score_override=None):
+                        score_override=None, score_extra=None):
     """把一个 BFS wave 的 admitted 子态 [(state, acts)] 按【Δ形式 V + 保护维 Pareto 骨架】截到
     beam_k 个（口径见 solver/beam.py：V=HP−Σ_R cost 对杀怪中性；保护维=消耗道具全保+钥匙按当前层
     门数封顶硬保护）。被截点交 sink 落盘审计（红线：不静默丢）。返回保留的 [(state, acts)]。
@@ -395,6 +395,10 @@ def _beam_truncate_wave(next_pts, beam_k, st, wave_idx, sink, future=None, diver
       None（默认）→ 走原 score_points/equiv_hp_over_roster（区势能 future 口径）、与原版字节一致；
       给函数 → 直接用它当 beam 排序键（旁路 roster 单遍打分），solver 不 import 任何塔特有模块（闭包
       持塔特有 zone 在驱动层 extract/）。两者互斥、override 优先；λ=0 零回归约定=驱动层在 λ=0 时传 None。
+    score_extra（可调用 state→数值 或 None）：【加性】引导项，叠加到区势能基分上（base + extra(st)），
+      只在 override=None 的区势能打分路生效（与 override 替换式互斥）。None（默认）→ 字节零回归；给函数
+      → 驱动层注入的"大件 pull 引导"（β_big·pull_大件，只进排序键、不进 value_vector 剪枝键）。塔无关：
+      闭包持塔特有 zone/大件判据在驱动层 extract/，solver 只透传不解释。
     塔无关：V/保护维全由引擎 compute_combat + DOOR_KEY_MAP 算，本函数无任何楼层/怪/道具/阈值硬编码。"""
     from solver.beam import (score_points, beam_select, equiv_hp_over_roster,
                              beam_protection_overflow)
@@ -403,9 +407,9 @@ def _beam_truncate_wave(next_pts, beam_k, st, wave_idx, sink, future=None, diver
     if score_override is not None:
         score_fn = score_override                            # 注入式替换打分（如 V_zone），旁路 roster
     else:
-        roster, big, scores = score_points(pts, future=future)   # 单遍 V：选点/落盘复用同批缓存
+        roster, big, scores = score_points(pts, future=future, extra=score_extra)  # 单遍 V：选点/落盘复用同批缓存
         score_fn = lambda stt: scores[id(stt)] if id(stt) in scores \
-            else equiv_hp_over_roster(stt, roster, big, future=future)
+            else equiv_hp_over_roster(stt, roster, big, future=future, extra=score_extra)
     kept, cut = beam_select(pts, beam_k, score_fn=score_fn, diversity_key_fn=diversity_key_fn)
     st.beam_cut_total += len(cut)
     st.beam_waves_truncated += 1
@@ -421,7 +425,8 @@ def _beam_truncate_wave(next_pts, beam_k, st, wave_idx, sink, future=None, diver
 
 def search_quotient(entry_state, goal_cell, step_fn, max_states=2_000_000, cross_floor=False,
                     beam_k=None, beam_cut_sink=None, on_admit=None, beam_future=None,
-                    beam_diversity=None, beam_score_fn=None, allow_purchase=False):
+                    beam_diversity=None, beam_score_fn=None, allow_purchase=False,
+                    beam_score_extra=None):
     """块图搜索：从 entry_state 出发，停在 goal_cell 且出口价值 Pareto 最优。
     输出契约对齐 solver.search.search_segment（found/goal_frontier/goal_frontier_actions/统计）。
     cross_floor=False（默认，phase1 段内）：任何离层子态裁掉（跨层由 phase1 forced 骨架处理）。
@@ -449,6 +454,10 @@ def search_quotient(entry_state, goal_cell, step_fn, max_states=2_000_000, cross
       的 score_override。None（默认）→ 走原区势能/roster 打分（与原版字节一致）；给函数 → 直接当排序键
       （如 V_zone=HP−D，驱动层 extract/ 闭包持塔特有 zone 注入）。与 beam_future 互斥、它优先。λ=0 零回归
       约定=驱动层在 λ=0 时传 None。塔无关：solver 不 import 任何塔特有模块，打分逻辑由注入闭包决定。
+    beam_score_extra（可调用 state→数值 或 None）：beam 截断的【加性】引导项，与 beam_future 区势能基分
+      相叠（base+extra），透传给 _beam_truncate_wave 的 score_extra。None（默认）→ 字节零回归；给函数 →
+      驱动层注入"大件 pull 引导"（只进 beam 排序键、不进 value_vector 剪枝键，守红线）。与 beam_score_fn
+      替换式互斥（仅区势能打分路生效）。塔无关：闭包持塔特有大件判据在 extract/，solver 只透传。
     allow_purchase（默认 False）：是否解开 choices 拦截态（商人/祭坛等付金购买事件）。False（默认）→
       撞 choices 即记 intercept_locs 并跳过、与原版【字节一致】（搜索结构性买不了任何东西）；True →
       对每个拦截子态用 _resolve_choices 按选项分支真实 step CHOICE，把「买/不买、买 N 次」全展开成
@@ -566,7 +575,8 @@ def search_quotient(entry_state, goal_cell, step_fn, max_states=2_000_000, cross
         # beam 控宽：本 wave 子态超 K 则按 V+保护维截断、落盘被截点（beam_k=None 时整段跳过→零回归）
         if beam_k is not None and len(next_pts) > beam_k:
             next_pts = _beam_truncate_wave(next_pts, beam_k, st, st.n_waves - 1,
-                                           beam_cut_sink, beam_future, div_fn, beam_score_fn)
+                                           beam_cut_sink, beam_future, div_fn, beam_score_fn,
+                                           score_extra=beam_score_extra)
         st.wave_log.append((len(wave), raw_out, len(next_pts)))
         wave = next_pts
         if st.hit_cap:

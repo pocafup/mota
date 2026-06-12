@@ -29,7 +29,7 @@ except Exception:
     pass
 
 from seg_experiment import build_initial_state
-from sim.simulator import _build_monster, WALL_TILES
+from sim.simulator import _build_monster, WALL_TILES, DOOR_KEY_MAP, _KEY_ITEMS
 from sim.combat import PlayerState, compute_combat
 from seg_identify_zone1 import analyze_floor, ZONE1
 
@@ -269,6 +269,177 @@ def v_zone(zone, state):
     if D == float("inf"):
         return float("-inf"), float("inf"), info + "/UNREACH"
     return h.hp - D, D, info
+
+
+# ───── 攻防宝石增益缓存（big_item_pull 大件涌现 / pull 引导项共用，数据真算不写死）─────
+# 位置/增益从各层【初始】地图算（_attr_item_delta 镜像引擎 _apply_item_effect），运行时是否还在由 live entities 判。
+
+def _attr_item_delta(items_db, iid, ratio):
+    """镜像引擎 _apply_item_effect 算道具 (Δatk, Δdef)；非攻防 pickup → (0,0)。"""
+    d = items_db.get(iid)
+    if not isinstance(d, dict):
+        return (0, 0)
+    pu = d.get("pickup")
+    if not isinstance(pu, dict):
+        return (0, 0)
+    da = dd = 0
+    tp = pu.get("type")
+    if tp == "stat":
+        gain = pu["base"] * ratio if pu.get("ratio_scaled") else pu.get("delta", 0)
+        if pu.get("stat") == "atk":
+            da = gain
+        elif pu.get("stat") == "def":
+            dd = gain
+    elif tp == "multi":
+        for op in pu["ops"]:
+            if op.get("stat") == "atk":
+                da += op["delta"]
+            elif op.get("stat") == "def":
+                dd += op["delta"]
+    return (da, dd)
+
+
+def _zone_attr_gems(zone):
+    """缓存：本区攻防宝石 {(fid,x,y): (Δatk,Δdef)}（位置/增益从各层【初始】地图算，增益用该层 ratio；
+       运行时是否还在由 live entities 判）。"""
+    if "attr_gems" in zone:
+        return zone["attr_gems"]
+    gems = {}
+    for fid, r in zone["floors"].items():
+        fl = r["floor"]
+        for y, row in enumerate(fl.entities):
+            for x, e in enumerate(row):
+                if not e:
+                    continue
+                iid = fl._tile_to_item.get(e)
+                if not iid:
+                    continue
+                da, dd = _attr_item_delta(fl._items_db, iid, fl.ratio)
+                if da or dd:
+                    gems[(fid, x, y)] = (da, dd)
+    zone["attr_gems"] = gems
+    return gems
+
+
+def v_zone_score(zone, state, kappa=0.0):
+    """打分基分 = HP − D_free（κ=0 唯一口径：当前属性算=已兑现，拿到才降）。返回 (score, D_free, 0, info)，
+    与 v_zone 标量字节一致。kappa 形参仅留作调用方/测试兼容（恒按 0 处理）；κ>0 的 D_rel 折价口径经
+    2026-06-10 实测惰性/有害已弃，改走 pull/区势能引导（见 [[project_goal_oriented_direction]]）。"""
+    vz, D, info = v_zone(zone, state)
+    return vz, D, 0, info
+
+
+# ───── 目标导向 pull：beam 排序键的【引导项】（玩家 2026-06-10 拍板，弃 κ 势能形）─────────
+#
+# 三层分离（Check① 已查清剪枝口径）：
+#   剪枝界 = value_vector（solver/search.py，纯持有资源多维 Pareto）—— pull 一字节不许碰；
+#   排序基分 = v_zone_score(κ=0)[0] = HP − D_free（当前属性算 = 已兑现，拿到才降，不预付）；
+#   pull = 朝【可达的高区势能下降攻防道具】的吸引（只进 score_override 排序键，绝不进 D/value_vector）。
+#
+# pull = Σ_g  Δ区势能(g) / (1 + 到 g 的最短损血距离)
+#   · g 取本区【还在地上、当前可达】的攻防宝石/剑盾（_zone_attr_gems，位置增益从源码地图真算）；
+#   · Δ区势能(g) = boss_toll(当前) − boss_toll(当前+g增益) ≥ 0（数据涌现：剑盾Δ大→值高，
+#     不写死"先拿盾"优先级——红线A）；
+#   · 距离折扣 1/(1+dist)：远道具几乎不加分；够不到(dist=inf) → 不计（可达性门控，红线B）。
+#
+# 为什么不复发 κ=1 反向病（红线B）：拿到 g 后 g 离场 → pull 项归 0，同时 base 因 D_free 降而跃升
+# ≈Δ区势能(g)；因 dist≥1（未拾道具英雄不站其上）→ pull 贡献 ≤ Δ区势能/2 < base 跃升 → 拿起永远
+# 严格优于守着（拾取兑现 > 守着引导）。κ=1 病是 savings 全额【预付进 V/D】使"拾取≈不拾取"；pull 距离
+# 折扣 + 拾取后离场 + 不进 value_vector → 是【引导梯度】非【价值预付】，本质不同。β 用来调引导强度
+# （β 一次一变量扫验证行为）；β=0 → 严格退回 base（字节零回归）。
+
+def _toll_dist_from(zone, src, atk, def_, mdef):
+    """从 src 跨层全图 Dijkstra（无早停），返回 {node: 最小累计损血}。供 pull 量到各攻防道具格的距离。
+    口径与 shortest_toll 一致（怪付 toll、门/钥匙/楼梯零代价过路、楼梯免费边），纯引导不要求 admissible。"""
+    dist = {src: 0}
+    pq = [(0, src)]
+    while pq:
+        d, node = heapq.heappop(pq)
+        if d > dist.get(node, float("inf")):
+            continue
+        fid, x, y = node
+        nbrs = [(fid, x + dx, y + dy) for dx, dy in _NB4]
+        if node in zone["links"]:
+            nbrs.append(zone["links"][node])
+        for nb in nbrs:
+            if not _passable(zone, nb):
+                continue
+            nd = d + _enter_cost(zone, nb, atk, def_, mdef)
+            if nd < dist.get(nb, float("inf")):
+                dist[nb] = nd
+                heapq.heappush(pq, (nd, nb))
+    return dist
+
+
+def pull(zone, state):
+    """beam 排序键的【引导项】(只进 score_override，绝不进 value_vector/D)。口径见上段。
+    返回 float ≥ 0。区已清/区外/无攻防道具/全拿光 → 0。"""
+    h = state.hero
+    fid = state.current_floor
+    if fid not in zone["floors"] or h.flags.get(BOSS_FLAG):
+        return 0.0
+    gems = _zone_attr_gems(zone)
+    if not gems:
+        return 0.0
+    floors = state.floors
+    remaining = []
+    for (gfid, x, y), (da, dd) in gems.items():
+        fl = floors.get(gfid)
+        if fl is not None and fl.entities[y][x] == 0:
+            continue                                   # 已拿走 → 不计（拾取兑现，离场）
+        remaining.append(((gfid, x, y), (da, dd)))
+    if not remaining:
+        return 0.0
+    boss_cur = boss_toll(zone, h.atk, h.def_, h.mdef)
+    dist = _toll_dist_from(zone, (fid, h.x, h.y), h.atk, h.def_, h.mdef)
+    total = 0.0
+    for (cell, (da, dd)) in remaining:
+        d = dist.get(cell)
+        if d is None or d == float("inf"):
+            continue                                   # 够不到 → 门控为 0（可达性门控）
+        value = boss_cur - boss_toll(zone, h.atk + da, h.def_ + dd, h.mdef)
+        if value <= 0:
+            continue
+        total += value / (1.0 + d)
+    return total
+
+
+def beam_rank_score(zone, state, beta=0.0):
+    """【beam 注入排序键】= 已兑现基分 + β·pull 引导。三层分离的落点：
+       value_vector(剪枝,纯资源) ⊥ 本基分(HP−D_free,κ=0,拿到才降) ⊥ pull(引导方向)。
+    β=0 → 严格 == v_zone_score(κ=0)[0]（字节零回归基线）；pull 只在此叠加，绝不污染 D/value_vector。
+    boss 无路(base=-inf) → 保持 -inf（pull 不得把不可达态抬到可达态之上）。"""
+    base = v_zone_score(zone, state, kappa=0.0)[0]
+    if beta == 0.0 or base == float("-inf"):
+        return base
+    return base + beta * pull(zone, state)
+
+
+# ───── 区门/钥匙几何（塔无关原语，从源码地形 + _tile_to_item∩_KEY_ITEMS 真算，不写死门数）─────
+# 通用几何缓存，供钥匙稀缺度等探针读用（probe_zone1_key_scarcity）；非打分逻辑，不进 V/D/剪枝界。
+
+def _zone_key_geometry(zone):
+    """惰性建并缓存：门格→色 / 钥匙物品格→色 / 色表(排序)。读各层【初始】terrain 与 entities。"""
+    if "key_geom" in zone:
+        return zone["key_geom"]
+    door_color, key_item, colors = {}, {}, set()
+    for fid, r in zone["floors"].items():
+        fl = r["floor"]
+        for y in range(len(fl.terrain)):
+            row_t = fl.terrain[y]
+            row_e = fl.entities[y]
+            for x in range(len(row_t)):
+                c = DOOR_KEY_MAP.get(row_t[x])
+                if c is not None:
+                    door_color[(fid, x, y)] = c
+                    colors.add(c)
+                iid = fl._tile_to_item.get(row_e[x])
+                if iid in _KEY_ITEMS:
+                    key_item[(fid, x, y)] = iid
+                    colors.add(iid)
+    geom = dict(door_color=door_color, key_item=key_item, colors=sorted(colors))
+    zone["key_geom"] = geom
+    return geom
 
 
 # ────────────────────────────── 自检 ──────────────────────────────
