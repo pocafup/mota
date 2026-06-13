@@ -1,0 +1,184 @@
+"""【GA decoder · 定向导航器】navigate_to —— ga_design.md 钉死点2 里【唯一要新写的核心件】。
+
+契约（ga_design.md 钉死点2.2 + 2.3）：
+    navigate_to(state, goal_cell, zone, step_fn) -> (final_state, moves, reached)
+  从当前态【定向】走向单个 goal_cell=(fid,x,y)：
+    · 够到 → (走到/拾起 goal 的真态, 从入口起的合法动作串, True)；
+    · 够不到（无钥/打不过/真不可达/撞 cap）→ (入口态原样, [], False)，【原子失败、零副作用】。
+  全程用现成原语组装、每个 token 经真 step 推进 → 产物【必然引擎可重放的合法路线】（撞墙/无钥/打不过
+  的动作要么不生成、要么 no-op）。绝不报错、绝不产非法路线。
+
+复用的现成原语（100%，零塔特定硬编码——楼层/怪/门全从注入 state/zone 通用字段读）：
+  · solver/quotient.py：_free_cells（英雄当前零损血自由块）/ _bfs_moves（块内走法）/
+    _boundary_ops(cross_floor=True)（块边界付代价算子：楼梯/杀怪/开门/假墙/触发）/ _expand_op（真 step
+    展开一个算子）/ _absorb（进块吸光零损血道具）/ _qfp（块图身份指纹，做导航去重）。
+  · extract/vzone.py：_passable / _NB4 / zone["links"]（楼层拓扑）—— 建【结构 hop 距离场】用。
+
+红线（与 fitness 隔离，ga_design.md 钉死点3 的对偶形态）：本器【绝不读任何 fitness/终评】。它只把英雄
+  合法推向 goal；走法好坏（潜力/HP/家底）是 fitness 的事，两者彻底隔离。方向启发只用【纯结构距离】
+  （走几格到 goal，非价值评分）。
+
+═══ 实现选型：为什么不是钉死点2.2 描述的「贪心单算子单路」（实现期实测纠偏，诚实标注 ga_design 风险节①）═══
+  设计稿原描述【贪心单算子单路推进 + optimistic 损血距离启发】。本 session 独立验证（tests/test_ga_navigate）
+  实测【证伪了这条路】，逐一排除如下，最终落到 GBFS + 支配剪枝 + 结构 hop 启发：
+
+  1) optimistic 损血距离（toll）做启发会【塌缩】：导航沿途【杀怪】→ 英雄与 goal 之间无活怪 → toll→0
+     成一大片平台（与属性无关，纯因清怪）。平台上启发失去方向性，退化成盲目 BFS，跨层 clearing 组合
+     爆炸（实测到盾 MT9 撞 5000 cap 仍困在 MT7、或 2.6万 pops/5min 才偶达且路线劣）。
+     → 改用【结构 hop 距离】（墙阻、楼梯无向边、门/怪当通的最短格数，反向 BFS 一次性建场）：纯几何、
+        不随清怪塌缩、永远指向 goal。剑（近）15 pops 最优达；盾（深）稳定可达。
+  2) 纯贪心 / 小束(beam) / slack 限界【均被证伪】：跨层钥匙-门依赖要求「先离 goal 方向去夺钥再回来」的
+     逆梯度绕行，任何局部界都把这步剪掉 → 卡在 MT6/MT7 过不去。必须【无界前沿带回溯】才跨得过。
+  3) 无界前沿的 clearing 爆炸用【支配剪枝】压：同一 _qfp 块下，(atk,def,mdef,hp,各色钥匙) 全 ≥ 即支配
+     ——弱者能做的强者全能做 → 弃弱者。把「同位置不同家底」的指数膨胀收敛。
+
+  与设计稿一致处：仍【定向】（前沿按到 goal 的结构距离升序弹）、仍【单路输出】（返回首个够到 goal 的
+  动作串）、仍只求一条合法路首达即停（非段搜索/非 Pareto/不带 value_vector）。方向启发选差最多让这条
+  基因解码得差→被 fitness 淘汰，绝不产非法路线（红线）。
+
+  ⚠ 已知效率短板（留给后续「棒」，本 session 不优化）：深目标（盾 MT9）因跨层钥匙-门搜索本质复杂，
+     需 ~2000-4000 pops / 10-20s；navigate_to 是 GA 内循环、将被调千百次 → 需后续【分阶段单层导航 /
+     路径跟随】等优化提速。本 session 只验证【够得到、路线在界内】，效率优化是下一棒。
+
+trade/CHOICE【留空接口】：导航器遇商人/祭坛 choices 拦截态（_event_intercepting）直接【跳过该算子】、
+  不决策买卖——买不买是 GA 基因/decoder 上层的事（ga_design.md 钉死点1 trade 决策位），本器只管"导航到点"。
+"""
+import heapq
+import sys
+from collections import deque
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent))   # solver / sim
+sys.path.insert(0, str(Path(__file__).parent))           # vzone（同目录）
+
+from solver.quotient import (
+    _free_cells, _bfs_moves, _boundary_ops, _expand_op, _absorb, _qfp,
+)
+from vzone import _passable, _NB4
+
+_INF = float("inf")
+
+
+def _hop_field_to_goal(zone, goal_cell):
+    """一次性反向 BFS：goal 到全图各格的【结构 hop 距离】（墙阻、楼梯无向边、门/怪当通行）。
+    纯几何、不随沿途清怪塌缩 → 永远指向 goal 的方向启发。返回 {cell: hop}（够不到的格不在表中）。"""
+    floors = zone["floors"]
+    adj = {}
+    for a, b in zone["links"].items():
+        adj.setdefault(a, set()).add(b)
+        adj.setdefault(b, set()).add(a)
+    dist = {goal_cell: 0}
+    dq = deque([goal_cell])
+    while dq:
+        node = dq.popleft()
+        d = dist[node]
+        fid, x, y = node
+        nbrs = [(fid, x + dx, y + dy) for dx, dy in _NB4]
+        nbrs.extend(adj.get(node, ()))
+        for nb in nbrs:
+            # 区外/未知楼层的格直接跳过（_passable 会对未知 fid KeyError）——区外 goal → 空场 → 必不可达
+            if nb not in dist and nb[0] in floors and _passable(zone, nb):
+                dist[nb] = d + 1
+                dq.append(nb)
+    return dist
+
+
+def _res_vector(state):
+    """导航资源向量：同块位置下做【支配】判定用。atk/def/mdef/hp 单调好，每色钥匙越多越好。"""
+    h = state.hero
+    return (h.atk, h.def_, h.mdef, h.hp, tuple(sorted(h.keys.items())))
+
+
+def _dominates(a, b):
+    """a 支配 b：atk/def/mdef/hp 全 ≥ 且每色钥匙 ≥（b 有而 a 缺的色 → 不支配）。a 能做的 b 全能做 → b 没用。"""
+    if not (a[0] >= b[0] and a[1] >= b[1] and a[2] >= b[2] and a[3] >= b[3]):
+        return False
+    ka = dict(a[4])
+    for color, cnt in b[4]:
+        if ka.get(color, 0) < cnt:
+            return False
+    return True
+
+
+def navigate_to(start_state, goal_cell, zone, step_fn, max_pops=8000):
+    """定向走向单个 goal_cell=(fid,x,y)。返回 (final_state, moves:list, reached:bool)。契约/选型见模块头。
+    GBFS：前沿按【结构 hop 距离】升序弹（次键 path-length 破平台、末键序号保堆稳定）；visited 用
+    【支配剪枝】（同 _qfp 块只留非被支配资源向量）压跨层 clearing 爆炸。
+    max_pops：前沿弹出护栏（失控/真不可达兜底）。"""
+    gfid, gx, gy = goal_cell
+    hop = _hop_field_to_goal(zone, goal_cell)
+
+    def h_of(state):
+        return hop.get((state.current_floor, state.hero.x, state.hero.y), _INF)
+
+    # visited: dict[_qfp] -> list(非被支配的资源向量)。返回 True=被既有支配（剪），False=已纳入。
+    visited = {}
+
+    def seen_or_add(state, free):
+        qf = _qfp(state, free)
+        res = _res_vector(state)
+        lst = visited.get(qf)
+        if lst is None:
+            visited[qf] = [res]
+            return False
+        for old in lst:
+            if _dominates(old, res):
+                return True
+        visited[qf] = [o for o in lst if not _dominates(res, o)] + [res]
+        return False
+
+    # 进块即吸光块内零损血道具（钥匙/宝石/装备）——没钥匙开不了门、到不了楼梯。失败仍返回【原始入口态】。
+    s0, m0 = _absorb(start_state, step_fn)
+    start_free = _free_cells(s0)
+    seen_or_add(s0, start_free)
+    # 前沿元素 (h=结构距离, g_dmg=累计真损血, length=步数, counter 序号 tiebreak, state, 动作 tuple)。
+    # 排序键 (h, g_dmg, length)：h 主【定向不塌缩】；同结构进度下 g_dmg 次【偏低损血路】（_absorb 零损血→
+    # 单步损血=该算子的 HP 下降，免 Dijkstra 现成可取）；length 末破平台。纯路径代价，绝不掺 fitness（红线）。
+    frontier = [(h_of(s0), 0, len(m0), 0, s0, tuple(m0))]
+    counter = 1
+    pops = 0
+
+    while frontier and pops < max_pops:
+        pops += 1
+        _, g_dmg, _, _, s, moves = heapq.heappop(frontier)
+        free = _free_cells(s)
+
+        # 够到：goal 已在当前自由块内 → 块内 BFS 走过去（沿途踩到即拾取）、首达即返回单路
+        if s.current_floor == gfid and (gx, gy) in free:
+            walk = _bfs_moves(s, free, (gx, gy))
+            if walk is not None:
+                gs = s
+                ok = True
+                for mv in walk:
+                    gs = step_fn(gs, mv)
+                    if gs.dead:
+                        ok = False
+                        break
+                if ok and (gs.hero.x, gs.hero.y) == (gx, gy):
+                    return gs, list(moves) + list(walk), True
+
+        # 朝 goal 推进：展开块边界付代价算子（cross_floor=True → 楼梯作免费跨层边），按结构距离排序入前沿
+        for op in _boundary_ops(s, free, cross_floor=True):
+            res = _expand_op(s, free, op, step_fn)
+            if res is None:
+                continue
+            child, op_moves = res
+            if child.dead:
+                continue
+            if child.floor._event_intercepting:
+                continue                      # 商人/祭坛 CHOICE：导航器不决策买卖（留空接口给 GA 层）
+            op_dmg = max(0, s.hero.hp - child.hero.hp)   # 该算子真损血（_absorb 前取；_absorb 零损血不计）
+            child, abs_moves = _absorb(child, step_fn)   # 进新块即吸光道具（捡钥匙→后续能开门）
+            if child.dead:
+                continue
+            child_free = _free_cells(child)
+            if seen_or_add(child, child_free):
+                continue
+            child_moves = moves + tuple(op_moves) + tuple(abs_moves)
+            heapq.heappush(
+                frontier,
+                (h_of(child), g_dmg + op_dmg, len(child_moves), counter, child, child_moves),
+            )
+            counter += 1
+
+    return start_state, [], False             # 前沿耗尽/撞 cap → 够不到，原样返回（原子失败）
