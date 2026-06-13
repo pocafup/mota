@@ -41,6 +41,15 @@
 7. **玩家判定：α_big=0.7 路线骨架最优**——终 HP 虽非最高，但**余血瓶/余钥匙/攻防底子潜力最高、最接近人手、已能不靠商人过一区**。→ **下一步 GA fitness 必须带"潜力"项、不能只用终 HP**（否则会选 718 那条把资源耗尽的）。
 - 产物：12 条 floorbest/h5route 按 gitignore（`*.jsonl`/`*.h5route`/`*.txt`）不入仓；**扫描 runner `route/_sweep_runner.ps1` 入仓**（参数化 beam/cap/ctag/alphas，可复用）。
 
+### §S4（本 session·2026-06-13）GA 实现首棒：navigate_to 定向导航器【已落地】
+> 严格分步进入 GA 实现，本棒**只**实现 navigate_to + 独立验证，**未碰 GA 种群/fitness/交叉变异/主循环**。已 commit（产品码 `extract/ga_navigate.py` + 验证 `tests/test_ga_navigate.py`，全套 152 pytest 绿）。
+
+- **契约**：`navigate_to(state, goal_cell, zone, step_fn) -> (final_state, moves, reached)`——定向走到单 goal，够到返真态+合法动作串+True，够不到原样返回入口态+False（**原子失败零副作用**）。`extract/ga_navigate.py`。
+- **★算法纠偏（重要，记牢免得下次重踩）**：设计稿钉死点2.2 原方案"乐观损血距离贪心单算子"被实测**证伪**——乐观 toll 启发沿途清怪塌缩成平台→退化盲目 BFS，跨层钥匙-门逆梯度绕行被局部界剪掉。改用：**结构 hop 距离**（反向 BFS 建场，门怪当通、纯几何不塌缩）做 GBFS 主键 + **真损血 g_dmg 次键** + **资源向量支配剪枝**。
+- **独立验证**（`tests/test_ga_navigate.py`）：3 个人手已知目标对（拿剑 MT5 / 拿盾 MT9 / 小宝石 MT1），全走到、损血**优于 α_big=0.7 人手基准**（拿剑达理论最优 246）。损血上界用 0.7 那条真 route 当参照（乐观下界低估跨层夺钥代价：盾下界 304 但人手实走 1202）。
+- **⚠ 已知瓶颈（下一棒必处理）**：navigate_to **慢**——深目标(盾)~2249 pops/14s。它是 GA 内循环、将被调千百次→**GA 主循环前必须先优化导航器性能（缓存/分层）**，否则 GA 跑不动。
+- **红线守住**：navigate_to **不读 fitness**；本 session 未碰 GA 种群/fitness/交叉变异/主循环。
+
 ---
 
 ## 🎯🎯🎯🎯🎯 下个会话主攻【2026-06-12·钥匙价值【已落地+阶段1实测完】→ 下个 session 做 Stage-2（红钥过 boss·γ+β_big 组合）·取代下方所有旧🎯】
