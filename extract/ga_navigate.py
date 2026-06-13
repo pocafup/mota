@@ -100,7 +100,45 @@ def _dominates(a, b):
     return True
 
 
-def navigate_to(start_state, goal_cell, zone, step_fn, max_pops=8000):
+def _nav_key(state):
+    """navigate_to 缓存身份键：捕获【所有会被 step 改写的可变态字段】，依据 _copy_state(simulator.py)
+    的深拷清单——它深拷/重建的字段=会变的，共享引用的=全局只读不变(events/db/楼梯表/怪表，整轮 GA 不变)。
+    正确性：step 是确定纯函数、只读「可变字段 + 只读共享引用」→ _nav_key 相等 ⟺ 两态全部可变字段逐字段
+    相同 ⟹ 同一 step 下走出逐字段相同的搜索树 ⟹ navigate_to 返回逐字段相同的 (final, moves, reached)。
+    任何会改导航/损血/可达的差异(远层一道门没开/少一把钥匙/少 1 点防/某怪没死/假墙没撞/auto 没开)都落在
+    某个纳入字段 → key 不同 → 不命中。
+    · 含 gold/items/kill_count：它们不影响可达(故导航器内 _res_vector 支配剪枝不用)，但是 final_state 的
+      字段——不纳入会让「仅 gold 不同」两态误命中、返回错 final。凡可变字段全纳入，保 final 逐字段正确。
+    · 不复用 _qfp：_qfp 只编码英雄【当前自由块】局部形状、不含持有资源、更不含远处楼层状态；navigate_to 是
+      跨层导航，远层门/怪/钥匙差异会改结果 → _qfp 不足以当跨层缓存键，故另造此全局键(_qfp 仍在导航器内做
+      块去重，不动)。"""
+    h = state.hero
+    hero_k = (h.x, h.y, h.hp, h.atk, h.def_, h.mdef, h.gold, h.kill_count,
+              tuple(sorted(h.keys.items())),
+              tuple(sorted(h.items.items())),
+              tuple(sorted((k, v) for k, v in h.flags.items()
+                           if isinstance(v, (int, float, str, bool)))))
+    floors_k = []
+    for fid in sorted(state.floors):
+        f = state.floors[fid]
+        floors_k.append((
+            fid,
+            tuple(map(tuple, f.entities)),        # 怪死=0/门开=0/道具拾=0/移怪 → 实体层改
+            tuple(map(tuple, f.terrain)),         # 假墙撞开 setBlock → 地形层改
+            frozenset(f._suppressed_events),      # 一次性到达事件已触发 → 该格是否还挡路
+            frozenset(f._done_after_battle),
+            f._first_arrive_done, f._event_break, f._event_intercepting,
+            tuple(f._event_pending_xy),
+        ))
+    return (state.current_floor, hero_k, tuple(floors_k),
+            frozenset(state.visited_floors),
+            tuple(sorted(state.pending_floor_change.items()))
+            if state.pending_floor_change else None,
+            repr(state._enemy_overrides),         # setEnemy 改怪(值可含 list special)→ repr 稳定可哈希
+            state.dead, state.won, state.auto_mode)
+
+
+def _navigate_to_uncached(start_state, goal_cell, zone, step_fn, max_pops=8000):
     """定向走向单个 goal_cell=(fid,x,y)。返回 (final_state, moves:list, reached:bool)。契约/选型见模块头。
     GBFS：前沿按【结构 hop 距离】升序弹（次键 path-length 破平台、末键序号保堆稳定）；visited 用
     【支配剪枝】（同 _qfp 块只留非被支配资源向量）压跨层 clearing 爆炸。
@@ -182,3 +220,29 @@ def navigate_to(start_state, goal_cell, zone, step_fn, max_pops=8000):
             counter += 1
 
     return start_state, [], False             # 前沿耗尽/撞 cap → 够不到，原样返回（原子失败）
+
+
+# ═══ 缓存外壳：只在导航器【外面】包一层 memoization，GBFS 主体(_navigate_to_uncached)一步不动 ═══
+_NAV_CACHE = {}   # 模块级默认缓存，按 id(zone) 分桶。GA 可传专用 dict；cache=None 则禁用(对照/调试)。
+
+
+def navigate_to(start_state, goal_cell, zone, step_fn, max_pops=8000, cache=_NAV_CACHE):
+    """navigate_to 的缓存外壳：【不改 GBFS 一步】，只在 _navigate_to_uncached 外包 memoization。
+    动机：GA 一代上百个体反复导航到同样几个目标(剑/盾等大件就那么几个)——(规整起点态, 目标)相同 → 直接
+    返缓存、省掉重复搜索。命中返回与首算【逐字段一致】的 (final, moves, reached)(正确性见 _nav_key)。
+    cache：默认模块级 _NAV_CACHE(测试/GA 共享、按 id(zone) 分桶防串味)；传 None → 禁用、字节回到原行为；
+      传自有 dict → 专用缓存。拦截态入口(罕见、pending 难规整成键)直接绕过缓存，行为同原算法。
+    返回值约定与原函数一致：成功 (final_state, moves:list, True)；够不到 (入口态本体, [], False)。
+    命中时 moves 返回新 list 副本(调用方可安全改)，final_state 返回缓存引用(step 纯函数→不会被就地改写)。"""
+    if cache is None or start_state.floor._event_intercepting:
+        return _navigate_to_uncached(start_state, goal_cell, zone, step_fn, max_pops)
+    key = (id(zone), max_pops, goal_cell, _nav_key(start_state))
+    hit = cache.get(key)
+    if hit is not None:
+        final, moves_t, reached = hit
+        if reached:
+            return final, list(moves_t), True
+        return start_state, [], False         # 原子失败命中：返回【当前入口态本体】保 `final is start` 契约
+    final, moves, reached = _navigate_to_uncached(start_state, goal_cell, zone, step_fn, max_pops)
+    cache[key] = (final if reached else None, tuple(moves), reached)
+    return final, moves, reached

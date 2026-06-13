@@ -190,3 +190,42 @@ def test_unreachable_goal_atomic_return(start, zone):
     assert reached is False, "区外目标竟报够到"
     assert moves == [], "原子失败应返回空动作串"
     assert final is start, "原子失败应原样返回入口态【同一对象】（零副作用）"
+
+
+# ─────────────── 缓存外壳：命中【逐字段等于首算、也等于无缓存】（缓存不改变导航行为的直接证明）─────────
+
+def test_cache_hit_returns_identical(start, zone, targets):
+    """同一(规整起点态,目标)二次导航第二次命中缓存 → final 全字段 + moves + reached 须与首算一致，且与
+    cache=None(旁路原算法)一致。原 5 个验证另证未破坏首算/重放；本测专钉 hit 路径。"""
+    sword = targets["sword"]
+    cache = {}
+    f1, m1, r1 = navigate_to(start, sword, zone, step, cache=cache)
+    assert r1 and len(cache) == 1, "首算应 miss 并存入恰 1 项"
+    f2, m2, r2 = navigate_to(start, sword, zone, step, cache=cache)
+    assert len(cache) == 1, "二次应命中、不新增缓存项"
+    assert r2 is r1 and m2 == m1, "命中 moves/reached 与首算不一致"
+    assert (f2.current_floor, f2.hero.x, f2.hero.y) == (f1.current_floor, f1.hero.x, f1.hero.y)
+    assert (f2.hero.hp, f2.hero.atk, f2.hero.def_, f2.hero.mdef) == \
+           (f1.hero.hp, f1.hero.atk, f1.hero.def_, f1.hero.mdef)
+    assert f2.hero.keys == f1.hero.keys and f2.hero.gold == f1.hero.gold
+
+    # 旁路对照：cache=None 走原算法，须与带缓存首算逐字段一致（证缓存外壳零回归）
+    f0, m0, r0 = navigate_to(start, sword, zone, step, cache=None)
+    assert r0 is r1 and m0 == m1, "无缓存与带缓存结果不一致（缓存外壳改变了行为）"
+    assert f0.hero.hp == f1.hero.hp and \
+           (f0.current_floor, f0.hero.x, f0.hero.y) == (f1.current_floor, f1.hero.x, f1.hero.y)
+
+    # 命中返回的 moves 是独立 list 副本：调用方改动不得污染缓存
+    m2.append("__POISON__")
+    _, m3, _ = navigate_to(start, sword, zone, step, cache=cache)
+    assert m3 == m1, "命中应返回独立 list 副本，调用方改动污染了缓存"
+
+
+def test_cache_atomic_failure_hit(start, zone):
+    """原子失败也进缓存：二次命中仍须返回【入口态本体】+ 空动作 + False（保 `final is start` 契约）。"""
+    cache = {}
+    off = ("MT0", 1, 1)
+    a1 = navigate_to(start, off, zone, step, max_pops=40, cache=cache)
+    a2 = navigate_to(start, off, zone, step, max_pops=40, cache=cache)
+    assert a1[0] is start and a1[1] == [] and a1[2] is False
+    assert a2[0] is start and a2[1] == [] and a2[2] is False, "失败命中须返回入口态本体"
