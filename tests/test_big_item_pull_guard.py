@@ -356,25 +356,54 @@ def test_full_realization_dominates_guarding_pull(zone, roster, big, battery):
           f"（≥1 → 拿走结构性压过守着、任意 β 无上限、治就近病）")
 
 
-# ───────────────── 命门⑤：共享 α 衰减旋钮（α=1 字节零回归 + 满额对任意 α 仍是上界）─────────────────
-# 玩家 2026-06-12：pull_大件/door_pull 距离衰减 /(1+dist) → /(1+dist)^α（共享旋钮，治剑盾长途被(1+dist)压扁/MT8门后谷）。
-# 钉死：①α=1 字节回滚零回归（_decay 显式 α==1.0 分支，不依赖浮点 pow(x,1.0)==x）；②满额 G=β·ΔRP₀ 对【任意 α∈(0,1]】
-# 仍 ≥ 守着引导 β·ΔRP/(1+dist)^α（结构性·不破红线）——α 只调引导陡峭度，绝不让守着反超拿走。
+# ─────────── 命门⑤：pull_大件 独立衰减旋钮 α_big（α_big=1 字节零回归 + 满额对任意 α_big 仍是上界 + 拒 α_big≤0）───────────
+# 玩家 2026-06-12 拆旋钮：pull_大件 距离衰减 /(1+dist) → /(1+dist)^α_big，由独立 --alpha-big 控、与 door_pull 的 α 解耦
+#   （根因：一个 α 背『愿意去远』与『目标价值排序』两冲突角色，见 project-alpha-dual-role；本次只实现+守卫、不扫参）。
+# 钉死：①α_big=1 字节回滚零回归（函数级 + @slow 搜索级，_decay 显式 α==1.0 分支，不依赖浮点 pow(x,1.0)==x）；
+#       ②满额 G=β·ΔRP₀ 对【任意 α_big∈(0,1]】仍 ≥ 守着引导 β·ΔRP/(1+dist)^α_big（结构性·κ=1 红线，α_big 只调陡峭度）；
+#       ③拒 α_big≤0（α_big<0 让 (1+dist)^α_big<1、守着反超 G 破红线；α_big=0 退化无距离区分）。
 
 def test_pull_big_alpha1_byte_identical_to_default(zone, roster, big, battery):
-    """共享 α 字节零回归：pull_big(alpha=1.0) 必逐态【字节】== 不传 alpha（默认）。
+    """①α_big=1 字节零回归（函数级）：pull_big(alpha_big=1.0) 必逐态【字节】== 不传（默认）。
     _decay 用显式 α==1.0 分支走原 (1+dist) 路径 → 不依赖跨平台不保证的 pow(x,1.0)==x。"""
     for s in battery:
         d = pull_big(zone, roster, s, big["cells"])
         a1 = pull_big(zone, roster, s, big["cells"], 1.0)
-        assert a1 == d, f"pull_big(α=1) 非字节零回归：default={d!r} α1={a1!r}(floor={s.current_floor})"
+        assert a1 == d, f"pull_big(α_big=1) 非字节零回归：default={d!r} α1={a1!r}(floor={s.current_floor})"
+
+
+@pytest.mark.slow
+def test_search_alpha_big1_byte_identical(zone, roster, big):
+    """①α_big=1 字节零回归（@slow 搜索级·复用 3 个 @slow 搜索等价守卫玩法）：用 β_big·pull_big(α_big) 闭包喂
+    search_quotient，α_big=1.0(显式) 与 默认(不传) 必跑出逐字段同搜索。隔离 pull 项（闭包不含 G/door_pull）→
+    专钉【拆旋钮接线 α_big=1 不改变搜索】。小 cap+小 beam、目标楼梯不可达→穷尽撞 cap、覆盖大量截断决策。"""
+    cap, beam = 4000, 16
+    goal = ("MT0", 1, 1)
+    cells = big["cells"]
+    beta_big = 8.0
+
+    def run(alpha_big):
+        start, _ = build_start()
+        if alpha_big is None:
+            extra = lambda st: beta_big * pull_big(zone, roster, st, cells)
+        else:
+            extra = lambda st: beta_big * pull_big(zone, roster, st, cells, alpha_big)
+        return search_quotient(start, goal, step, max_states=cap, cross_floor=True,
+                               beam_k=beam, beam_future=FutureCfg(roster, LAM),
+                               beam_score_extra=extra)
+
+    default = run(None)
+    a1 = run(1.0)
+    for f in ("found", "states_expanded", "states_generated", "states_admitted",
+              "frontier_peak", "distinct_fingerprints", "goal_hits", "hit_cap"):
+        assert getattr(default, f) == getattr(a1, f), f"α_big=1 偏离默认：{f}"
 
 
 def test_full_realization_dominates_guard_any_alpha(zone, roster, big, battery):
-    """满额兑现【对任意 α】仍压过守着（共享 α 红线·结构性）：对每个【在场·够得到】大件、每个
-    α∈{1,0.7,0.5,0.3}，满额 take=β·ΔRP₀ ≥ 守着 guard=β·pull_big(α)=β·ΔRP/(1+dist)^α。
-    机理：(1+dist)^α≥1（dist≥0,α≥0）且 ΔRP₀≥ΔRP(当前) ⇒ take/guard=(ΔRP₀/ΔRP)·(1+dist)^α≥1，与 α 无关地成立。
-    α<1 衰减更弱→守着引导更高→对不等式更严苛，仍须成立。报告每个 α 的 min(满额/守着)。"""
+    """②满额兑现【对任意 α_big】仍压过守着（α_big 红线·结构性）：对每个【在场·够得到】大件、每个
+    α_big∈{1,0.7,0.5,0.3}，满额 take=β·ΔRP₀ ≥ 守着 guard=β·pull_big(α_big)=β·ΔRP/(1+dist)^α_big。
+    机理：(1+dist)^α_big≥1（dist≥0,α_big>0）且 ΔRP₀≥ΔRP(当前) ⇒ take/guard=(ΔRP₀/ΔRP)·(1+dist)^α_big≥1，与 α_big 无关地成立。
+    α_big<1 衰减更弱→守着引导更高→对不等式更严苛，仍须成立。报告每个 α_big 的 min(满额/守着)。"""
     beta = 1.0
     table = build_pickup_bonus(big["ranked"], big["cells"], beta, 0.0)
     worst = {}
@@ -397,5 +426,14 @@ def test_full_realization_dominates_guard_any_alpha(zone, roster, big, battery):
                 exercised += 1
         worst[alpha] = min_ratio
     assert exercised >= 1, "未覆盖任何在场够得到的大件态（电池组/检测口径漂移？）"
-    print("\n[共享α·满额≥守着] min(满额/守着) by α：  " +
-          "  ".join(f"α={a}:{worst[a]:.2f}" for a in (1.0, 0.7, 0.5, 0.3)))
+    print("\n[α_big·满额≥守着] min(满额/守着) by α_big：  " +
+          "  ".join(f"α_big={a}:{worst[a]:.2f}" for a in (1.0, 0.7, 0.5, 0.3)))
+
+
+def test_pull_big_rejects_nonpositive_alpha(zone, roster, big, battery):
+    """③拒 α_big≤0（红线守卫）：α_big=0/负 必 raise ValueError——α_big<0 让 (1+dist)^α_big<1、守着可能反超
+    满额 G 破 κ=1 红线；α_big=0 退化为无距离区分。取真态喂 pull_big（遵铁律：绝不手造态）。"""
+    s = battery[0]
+    for bad in (0.0, -0.5, -1.0):
+        with pytest.raises(ValueError):
+            pull_big(zone, roster, s, big["cells"], bad)

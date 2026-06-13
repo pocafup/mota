@@ -44,7 +44,8 @@ def _delta_rp(state, roster, base_pot, da, dd):
 
 
 def _decay(dist, alpha):
-    """距离衰减分母 (1+dist)^α —— pull_big 与 door_pull【共享】的距离折扣旋钮（单一事实源）。
+    """距离衰减分母 (1+dist)^α —— pull_big 与 door_pull【共享的公式 helper】（单一事实源）；α 值各自
+    独立传入（pull_big=α_big、door_pull=α，2026-06-12 拆旋钮解耦，见 project-alpha-dual-role）。
     α=1 → 走原 (1+dist) 路径【字节零回归】（显式分支，不依赖跨平台不保证的浮点恒等 pow(x,1.0)==x）；
     α∈(0,1) → 减弱距离衰减、抬【远处大件/门后】的在场引导梯度（治剑盾长途被(1+dist)压扁 / MT8 门后谷）。
     为何不破红线：满额兑现 G=β·ΔRP₀ 仍是在场引导上界——(1+dist)^α≥1（dist≥0,α≥0）且 ΔRP₀≥ΔRP(当前)
@@ -86,11 +87,18 @@ def detect_big_items(zone, roster, ref_state, min_gap=2.0):
     return big_cells, tau, ranked
 
 
-def pull_big(zone, roster, state, big_cells, alpha=1.0):
-    """beam 排序键的【大件引导项】≥0：Σ_{g∈big_cells·还在地上·够得到} ΔRP(g,state)/(1+dist)^α。
+def pull_big(zone, roster, state, big_cells, alpha_big=1.0):
+    """beam 排序键的【大件引导项】≥0：Σ_{g∈big_cells·还在地上·够得到} ΔRP(g,state)/(1+dist)^α_big。
     大件全拿光/区外/已过 boss → 0（早退，省 Dijkstra）。只引导、不兑现、不进 value_vector（红线）。
     口径：ΔRP 用【当前态】（引导梯度反映当下边际减伤），dist 用当前格全图 toll-Dijkstra（vzone 同源）。
-    alpha：距离衰减指数 (1+dist)^α（与 door_pull 共享旋钮，见 _decay）；α=1 字节零回归、α<1 抬远处引导。"""
+    alpha_big：pull_大件【独立】距离衰减指数 (1+dist)^α_big（2026-06-12 拆旋钮、与 door_pull 的 α 解耦，
+      _decay 仅共享公式；见 project-alpha-dual-role）；α_big=1 字节零回归、α_big∈(0,1) 抬远处大件引导。
+      须严格>0：α_big<0 让 (1+dist)^α_big<1、守着 β·ΔRP/(1+dist)^α_big 可能反超满额 G=β·ΔRP₀ 破 κ=1 红线；
+      α_big=0 退化为无距离区分（远近大件同分、丢失价值密度排序）。"""
+    if alpha_big <= 0:
+        raise ValueError(
+            f"α_big 须严格 > 0（得 {alpha_big!r}）：(1+dist)^α_big 须 ≥ 1 才保『满额 G=β·ΔRP₀ ≥ 守着 "
+            f"β·ΔRP/(1+dist)^α_big』红线（α_big<0 分母<1 守着反超 G；α_big=0 退化无距离区分）。")
     if not big_cells:
         return 0.0
     h = state.hero
@@ -119,7 +127,7 @@ def pull_big(zone, roster, state, big_cells, alpha=1.0):
         drp = _delta_rp(state, roster, base, da, dd)
         if drp <= 0:
             continue
-        total += drp / _decay(d, alpha)
+        total += drp / _decay(d, alpha_big)
     return total
 
 
