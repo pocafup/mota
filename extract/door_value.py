@@ -34,7 +34,7 @@
 """
 import heapq
 
-from big_item_pull import _region_pot, _delta_rp
+from big_item_pull import _region_pot, _delta_rp, _decay
 from vzone import (_zone_attr_gems, _toll_dist_from, _passable, _NB4,
                    _zone_key_geometry, boss_toll, BOSS_FLAG, BOSS_FLOOR, BOSS_CELL)
 from sim.simulator import DOOR_KEY_MAP
@@ -194,9 +194,10 @@ def _unabsorbed(state, info):
     return Ru, cells
 
 
-def door_pull(zone, state, door_reward, gamma):
-    """beam 排序键的【门后价值引导项】≥0：Σ_{d: 门后有未吸价值·够得到} γ·R_未吸(d)/(1+dist_arc)。
-    口径见模块顶。空表/γ=0/区外/已胜 boss/门后全吸完 → 0（早退，省 Dijkstra）。只引导、不兑现、不进 value_vector。"""
+def door_pull(zone, state, door_reward, gamma, alpha=1.0):
+    """beam 排序键的【门后价值引导项】≥0：Σ_{d: 门后有未吸价值·够得到} γ·R_未吸(d)/(1+dist_arc)^α。
+    口径见模块顶。空表/γ=0/区外/已胜 boss/门后全吸完 → 0（早退，省 Dijkstra）。只引导、不兑现、不进 value_vector。
+    alpha：距离衰减指数 (1+dist_arc)^α（与 pull_大件 共享旋钮，见 big_item_pull._decay）；α=1 字节零回归、α<1 抬远门后引导。"""
     if not door_reward or gamma == 0:
         return 0.0
     h = state.hero
@@ -236,5 +237,5 @@ def door_pull(zone, state, door_reward, gamma):
             if kd == _INF:
                 continue                                        # 无可达同色钥匙 → 开不了门 → 不计（不奖励开不了的门）
             pen = kd
-        total += gamma * Ru / (1.0 + nd + pen)
+        total += gamma * Ru / _decay(nd + pen, alpha)
     return total

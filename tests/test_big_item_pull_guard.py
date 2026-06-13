@@ -354,3 +354,48 @@ def test_full_realization_dominates_guarding_pull(zone, roster, big, battery):
     assert exercised >= 1, "命门④-④未覆盖任何在场够得到的大件态（电池组/检测口径漂移？）"
     print(f"\n[满额兑现] 覆盖 {exercised} 态；min(满额 β·ΔRP₀ / 守着 β·ΔRP/(1+dist))={min_ratio:.2f}"
           f"（≥1 → 拿走结构性压过守着、任意 β 无上限、治就近病）")
+
+
+# ───────────────── 命门⑤：共享 α 衰减旋钮（α=1 字节零回归 + 满额对任意 α 仍是上界）─────────────────
+# 玩家 2026-06-12：pull_大件/door_pull 距离衰减 /(1+dist) → /(1+dist)^α（共享旋钮，治剑盾长途被(1+dist)压扁/MT8门后谷）。
+# 钉死：①α=1 字节回滚零回归（_decay 显式 α==1.0 分支，不依赖浮点 pow(x,1.0)==x）；②满额 G=β·ΔRP₀ 对【任意 α∈(0,1]】
+# 仍 ≥ 守着引导 β·ΔRP/(1+dist)^α（结构性·不破红线）——α 只调引导陡峭度，绝不让守着反超拿走。
+
+def test_pull_big_alpha1_byte_identical_to_default(zone, roster, big, battery):
+    """共享 α 字节零回归：pull_big(alpha=1.0) 必逐态【字节】== 不传 alpha（默认）。
+    _decay 用显式 α==1.0 分支走原 (1+dist) 路径 → 不依赖跨平台不保证的 pow(x,1.0)==x。"""
+    for s in battery:
+        d = pull_big(zone, roster, s, big["cells"])
+        a1 = pull_big(zone, roster, s, big["cells"], 1.0)
+        assert a1 == d, f"pull_big(α=1) 非字节零回归：default={d!r} α1={a1!r}(floor={s.current_floor})"
+
+
+def test_full_realization_dominates_guard_any_alpha(zone, roster, big, battery):
+    """满额兑现【对任意 α】仍压过守着（共享 α 红线·结构性）：对每个【在场·够得到】大件、每个
+    α∈{1,0.7,0.5,0.3}，满额 take=β·ΔRP₀ ≥ 守着 guard=β·pull_big(α)=β·ΔRP/(1+dist)^α。
+    机理：(1+dist)^α≥1（dist≥0,α≥0）且 ΔRP₀≥ΔRP(当前) ⇒ take/guard=(ΔRP₀/ΔRP)·(1+dist)^α≥1，与 α 无关地成立。
+    α<1 衰减更弱→守着引导更高→对不等式更严苛，仍须成立。报告每个 α 的 min(满额/守着)。"""
+    beta = 1.0
+    table = build_pickup_bonus(big["ranked"], big["cells"], beta, 0.0)
+    worst = {}
+    exercised = 0
+    for alpha in (1.0, 0.7, 0.5, 0.3):
+        min_ratio = float("inf")
+        for s in battery:
+            for cell in big["cells"]:
+                gfid, x, y = cell
+                fl = s.floors.get(gfid)
+                if fl is None or fl.entities[y][x] == 0:
+                    continue
+                guard = beta * pull_big(zone, roster, s, {cell}, alpha)
+                if guard <= 0.0:
+                    continue
+                take = table[cell]
+                assert take >= guard - 1e-6, \
+                    f"α={alpha}：满额 {take:.0f} < 守着 {guard:.0f}（{cell} floor={s.current_floor}）"
+                min_ratio = min(min_ratio, take / guard)
+                exercised += 1
+        worst[alpha] = min_ratio
+    assert exercised >= 1, "未覆盖任何在场够得到的大件态（电池组/检测口径漂移？）"
+    print("\n[共享α·满额≥守着] min(满额/守着) by α：  " +
+          "  ".join(f"α={a}:{worst[a]:.2f}" for a in (1.0, 0.7, 0.5, 0.3)))

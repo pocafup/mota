@@ -322,3 +322,22 @@ def test_pull_zero_after_boss_cleared(zone, reward_win, battery):
             f"已胜 boss 仍 door_pull≠0(floor={s.current_floor})"
         exercised += 1
     assert exercised >= 1, "命门⑥(胜后归零)未覆盖任何态"
+
+
+# ───────────────── 命门⑦：共享 α 衰减旋钮（door_pull α=1 字节零回归）─────────────────
+# 玩家 2026-06-12：door_pull 距离衰减 /(1+dist_arc) → /(1+dist_arc)^α（与 pull_大件 共享旋钮 _decay）。
+# α=1 必须字节回滚零回归（显式 α==1.0 分支，不依赖 pow(x,1.0)==x）；α<1 减弱衰减、抬远门后引导（治 MT8 门后谷）。
+
+def test_door_pull_alpha1_byte_identical_to_default(zone, reward_win, battery):
+    """共享 α 字节零回归：door_pull(alpha=1.0) 必逐态【字节】== 不传 alpha（默认）。
+    用 reward_win（含 win 长臂门、dist_arc 含钥匙腿 pen）+ 多 γ 覆盖 penalty/win 路径，钉死显式 α==1.0 分支。"""
+    exercised = 0
+    for s in battery:
+        for g in (0.1, 1.0, 10.0):
+            d = door_pull(zone, s, reward_win, g)
+            a1 = door_pull(zone, s, reward_win, g, 1.0)
+            assert a1 == d, \
+                f"door_pull(α=1,γ={g}) 非字节零回归：default={d!r} α1={a1!r}(floor={s.current_floor})"
+            if d > 0.0:
+                exercised += 1
+    assert exercised >= 1, "命门⑦未覆盖任何 door_pull>0 的态（电池组/口径漂移？）"

@@ -149,6 +149,14 @@ def main():
     ap.add_argument("--door-win", action="store_true",
                     help="门后价值是否计入【解锁 boss/通关】巨值（阶段2·长臂红钥过 boss）：默认关(阶段1·短臂，"
                          "纯宝石/血 pocket、干净接 G/HP 崖)；开=include_win，R 含 win=_region_pot(整区待克势能 hp 当量)，验红钥→boss 长臂")
+    ap.add_argument("--alpha", type=float, default=1.0,
+                    help="【共享 α·距离衰减旋钮】pull_大件 与 door_pull 的距离折扣 (1+dist)^α（仅 --score region 生效，玩家 2026-06-12）："
+                         "1=关(原 /(1+dist) 线性衰减，字节零回归)；α∈(0,1)=减弱衰减、抬【远处大件/门后】在场引导梯度"
+                         "（治剑盾长途被(1+dist)压扁致先扫近宝石 / MT8 门后谷被淹没）。满额兑现 G=β·ΔRP₀ 对任意 α 仍是在场引导上界 "
+                         "→ 拿走≥守着、不复发 κ=1/hover（只调引导陡峭度、守红线）。共享同一 α 同时作用 pull_大件 与 door_pull")
+    ap.add_argument("--no-cut", action="store_true",
+                    help="跳过 beam 截断点审计文件 crossbeam_cut_*.jsonl 落盘（纯审计副产物、不影响搜索/打分/floorbest）："
+                         "扫参/磁盘紧张时省 I/O 与空间。red-line 审计需要时去掉本旗即恢复。")
     args = ap.parse_args()
     beam_diversity = None if args.diversity == "none" else args.diversity
     goal_cell = (args.goal_floor, 1, 1)
@@ -161,6 +169,8 @@ def main():
         score_tag += f"_bs{args.beta_small:g}"
     if args.score == "region" and args.gamma_door:
         score_tag += f"_gd{args.gamma_door:g}" + ("w" if args.door_win else "")
+    if args.score == "region" and args.alpha != 1.0:
+        score_tag += f"_a{args.alpha:g}"
 
     # ── V_zone 替换式打分（仅 --score vzone 时注入）：塔特有 zone（含 MT10 boss）在驱动层 extract/ 构建、
     #    闭包持有；solver 只收一个 state→数值 闭包、不 import 任何塔特有模块（塔无关铁律）。score_override 优先于 roster。
@@ -222,6 +232,7 @@ def main():
         _beta_big = args.beta_big
         _beta_small = args.beta_small
         _gamma_door = args.gamma_door
+        _alpha = args.alpha                 # 共享距离衰减旋钮 (1+dist)^α（同作用 pull_大件 / door_pull）
         # 满额兑现拿取奖励表（ΔRP₀ 参照态固定常数·数据涌现）：大件→β_big·ΔRP₀、小宝石→β_small·ΔRP₀（拿走才兑现）。
         _bonus_table = build_pickup_bonus(_ranked, _big_cells, _beta_big, _beta_small)
         # 门后价值表（仅 γ>0 才建）：门锚定全臂梯度 door_pull 的奖励源 R(门)。塔无关：门/钥匙/boss 门禁结构读出。
@@ -247,10 +258,10 @@ def main():
             if hit is not None and hit[0] is s:
                 return hit[1]
             # 引导侧 = β_big·pull_大件(在场折扣引导) + G(满额兑现拿取奖励) + γ·door_pull(门后价值·门锚定全臂梯度)。
-            v = _beta_big * pull_big(_bb_zone, roster, s, _big_cells) if _beta_big else 0.0
+            v = _beta_big * pull_big(_bb_zone, roster, s, _big_cells, _alpha) if _beta_big else 0.0
             v += pickup_bonus(s, _bonus_table)
             if _gamma_door:                 # γ=0 → 跳过 → 与 β_big/β_small 路字节零回归
-                v += door_pull(_bb_zone, s, _door_reward, _gamma_door)
+                v += door_pull(_bb_zone, s, _door_reward, _gamma_door, _alpha)
             _bb_memo[id(s)] = (s, v)
             return v
 
@@ -296,13 +307,20 @@ def main():
         first_wave_reach.setdefault(stt.current_floor, len(actions))
 
     cut_path = OUT / f"crossbeam_cut_K{args.beam}{score_tag}_lam{args.lam}_{args.diversity}.jsonl"
-    fh = cut_path.open("w", encoding="utf-8")
     n_cut_written = [0]
+    if args.no_cut:
+        fh = None
 
-    def sink(records):
-        for r in records:
-            fh.write(json.dumps(r, ensure_ascii=False) + "\n")
-            n_cut_written[0] += 1
+        def sink(records):
+            for _ in records:                  # 仍消费迭代器、只计数不落盘（审计被 --no-cut 关）
+                n_cut_written[0] += 1
+    else:
+        fh = cut_path.open("w", encoding="utf-8")
+
+        def sink(records):
+            for r in records:
+                fh.write(json.dumps(r, ensure_ascii=False) + "\n")
+                n_cut_written[0] += 1
 
     t0 = time.perf_counter()
     res = search_quotient(start, goal_cell, step, max_states=args.cap, cross_floor=True,
@@ -310,7 +328,8 @@ def main():
                           beam_future=beam_future, beam_diversity=beam_diversity,
                           beam_score_fn=beam_score_fn, beam_score_extra=beam_score_extra)
     dt = time.perf_counter() - t0
-    fh.close()
+    if fh is not None:
+        fh.close()
 
     floors_seen = getattr(res, "floors_seen", [])
     fpf = getattr(res, "fp_by_floor", {})
