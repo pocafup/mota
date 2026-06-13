@@ -5,6 +5,21 @@
 
 ---
 
+## 📌 2026-06-13 收尾·S1 pull_big 独立旋钮 α_big + S2 α_big 扫描（剑盾线；**不**取代下方红钥 Stage-2 主线）
+
+> 本 session 两小步、产品码+守卫已 commit（只读扫描、未改任何逻辑、未碰 door_pull）。
+
+- **S1**：`pull_big` 装独立衰减旋钮 `--alpha-big`，距离衰减 `/(1+dist) → /(1+dist)^α_big`，与 door_pull 的 α **解耦**（根因：一个 α 背"愿意去远"与"目标价值排序"两冲突角色，见 [[project-alpha-dual-role]]）。**默认 α_big=1 字节零回归**、**147 pytest 绿**（守卫：①α_big=1 零回归 函数级+@slow 搜索级 ②满额 G=β·ΔRP₀ 对任意 α_big∈(0,1] 仍是守着引导上界 ③拒 α_big≤0）。
+- **S2 扫 α_big∈{1,0.7,0.5,0.3} 关键发现**（`analyze_priorities.py` 重放真引擎读拾取时序；玩家网站回放终审）：
+  1. **旧"剑盾"诊断里"盾前扫光 6 个 MT1-5 宝石"前提已失效**——door_pull 落地后基线演化，现基线 α_big=1 盾在 **step422**、盾前只 **3 个**（MT3/MT3/MT4）。（下方 §A line40-41 的 step432/6宝石/576-25-25 是**旧快照·已被本条取代**。）
+  2. **α_big=0.7 唯一无异常**：盾 step417、盾前 2 个、HP**583**（略优基线 571/26/24）。
+  3. **α_big≤0.5 崩**：硬闯远盾 HP→67（step288）；α_big=0.3 截断（670 步只吃 5 件、终 21/22）。
+  4. **四条同深 MT10 入口、无红钥**：MT10 卡死＝α 无关的红钥/门老问题、本次不涉及；**无崩爬**。
+- **下个方向**：(a) α_big∈[0.5,1.0] 细扫 × 预算 overnight；(b) 随机化/遗传搜索（目标层编码 + sim 当 decoder + 真 HP 当 fitness，待独立设计）；(c) future：核 scoring 是否处处用 ΔRP（阶梯感知）而非线性近似。
+- **S2 构建产物**（ab0.7/0.5/0.3 floorbest jsonl + 4 条 .h5route）按惯例不入仓。
+
+---
+
 ## 🎯🎯🎯🎯🎯 下个会话主攻【2026-06-12·钥匙价值【已落地+阶段1实测完】→ 下个 session 做 Stage-2（红钥过 boss·γ+β_big 组合）·取代下方所有旧🎯】
 
 > **本 session 成果**：把上节"读码地基"的方案【落地+阶段1 rigorous 实测】完。`extract/door_value.py`（门锚定全臂梯度 door_pull）+ `tests/test_door_value_guard.py`（**13 条 κ=1 守卫·6 命门全过**）+ 接线 `probe_crossfloor_beam.py --gamma-door/--door-win` + 分析器 `extract/analyze_door_open.py`（**重放真引擎逐态核对门开/pocket 吸，不靠观察推断**）。**全 pytest 142 过、零回归**（γ=0 字节零回归守卫钉死）。**⚠ 全部未 commit（见末尾状态）。**
