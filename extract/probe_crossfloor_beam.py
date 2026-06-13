@@ -138,6 +138,17 @@ def main():
                          ">0=开(小宝石【已拿走·entities==0】才给 β_small·ΔRP₀(g)，【只拿取奖励、无在场 pull】→无平台、无就近病风险)。"
                          "小宝石不在 big_cells、不进 pull_大件；ΔRP₀ 由 detect_big_items 数据涌现。只进 beam_score_extra，"
                          "绝不进 D/value_vector(守红线)。与 β_big 独立、一次只扫一个变量")
+    ap.add_argument("--gamma-door", type=float, default=0.0,
+                    help="【钥匙价值·门锚定全臂梯度】系数 γ（仅 --score region 生效，玩家 2026-06-12 选项1）："
+                         "0=关(无 door_pull，与原版字节零回归基线)；"
+                         ">0=开(排序键 += Σ_{门后有未吸价值·够得到} γ·R_未吸(门)/(1+dist_arc))。R(门)=门后专属 pocket 内"
+                         "【小宝石 ΔRP₀+血瓶 HP(+win 若 boss 在 pocket)】，排怪 toll(已在 D)/排大件(pull_大件已引导)；"
+                         "dist_arc=门乐观 dist 到最近未吸格 + 钥匙腿(门闭且无该色钥→加最近同色钥匙 dist=拿钥匙→开门→吸价值全臂)。"
+                         "锚在【开门动作+pocket 未吸】非锚【持有钥匙】→ 不复发 κ=1；只进 beam_score_extra，绝不进 D/value_vector。"
+                         "与 β_big/β_small 独立、一次只扫一个变量")
+    ap.add_argument("--door-win", action="store_true",
+                    help="门后价值是否计入【解锁 boss/通关】巨值（阶段2·长臂红钥过 boss）：默认关(阶段1·短臂，"
+                         "纯宝石/血 pocket、干净接 G/HP 崖)；开=include_win，R 含 win=_region_pot(整区待克势能 hp 当量)，验红钥→boss 长臂")
     args = ap.parse_args()
     beam_diversity = None if args.diversity == "none" else args.diversity
     goal_cell = (args.goal_floor, 1, 1)
@@ -148,6 +159,8 @@ def main():
         score_tag += f"_bb{args.beta_big:g}"
     if args.score == "region" and args.beta_small:
         score_tag += f"_bs{args.beta_small:g}"
+    if args.score == "region" and args.gamma_door:
+        score_tag += f"_gd{args.gamma_door:g}" + ("w" if args.door_win else "")
 
     # ── V_zone 替换式打分（仅 --score vzone 时注入）：塔特有 zone（含 MT10 boss）在驱动层 extract/ 构建、
     #    闭包持有；solver 只收一个 state→数值 闭包、不 import 任何塔特有模块（塔无关铁律）。score_override 优先于 roster。
@@ -200,15 +213,20 @@ def main():
     # ── 【结合】大件 pull 引导（仅 --score region + β_big>0）：region 区势能基分(兑现侧) + β_big·pull_大件(引导侧)。
     #    大件由 ΔRP 减伤量【数据涌现】（detect_big_items 找最大乘性缝、不硬编码"剑盾"）；只进 beam_score_extra 排序键，
     #    绝不进 D/value_vector（守红线）。塔特有 zone/大件判据在驱动层闭包，solver 只收 state→数值 不 import。
-    if args.score == "region" and (args.beta_big or args.beta_small):
+    if args.score == "region" and (args.beta_big or args.beta_small or args.gamma_door):
         from big_item_pull import detect_big_items, pull_big, build_pickup_bonus, pickup_bonus
+        from door_value import build_door_reward, door_pull
         from vzone import build_zone as _build_zone_bb
         _bb_zone = _build_zone_bb()
         _big_cells, _tau, _ranked = detect_big_items(_bb_zone, roster, start)
         _beta_big = args.beta_big
         _beta_small = args.beta_small
+        _gamma_door = args.gamma_door
         # 满额兑现拿取奖励表（ΔRP₀ 参照态固定常数·数据涌现）：大件→β_big·ΔRP₀、小宝石→β_small·ΔRP₀（拿走才兑现）。
         _bonus_table = build_pickup_bonus(_ranked, _big_cells, _beta_big, _beta_small)
+        # 门后价值表（仅 γ>0 才建）：门锚定全臂梯度 door_pull 的奖励源 R(门)。塔无关：门/钥匙/boss 门禁结构读出。
+        _door_reward = (build_door_reward(_bb_zone, roster, start, _big_cells, _ranked,
+                                          include_win=args.door_win) if _gamma_door else {})
         print(f"【结合】大件涌现（ΔRP 最大乘性缝，不硬编码）：τ={_tau:,.0f}  大件 {len(_big_cells)} 件  "
               f"β_big={_beta_big:g} β_small={_beta_small:g}  拿取奖励表 {len(_bonus_table)} 格：")
         for drp, cell, da, dd in _ranked:
@@ -216,14 +234,23 @@ def main():
             g = _bonus_table.get(cell)
             gtag = f"  G拿取={g:,.0f}" if g else ""
             print(f"    {mark} {cell[0]}({cell[1]},{cell[2]}) +atk{da}/+def{dd}  ΔRP={drp:,.0f}{gtag}")
+        if _gamma_door:
+            print(f"【钥匙价值】门锚定全臂梯度 γ={_gamma_door:g}  include_win={args.door_win}  "
+                  f"门后有可兑现价值的门 {len(_door_reward)} 扇（R 降序）：")
+            for dcell, info in sorted(_door_reward.items(), key=lambda kv: -kv[1]["R"]):
+                wtag = f"  win={info['win']:,.0f}" if info["win"] else ""
+                print(f"    门{dcell[0]}({dcell[1]},{dcell[2]}) {info['color']:<9} R={info['R']:>12,.0f}  "
+                      f"pocket={len(info['pocket']):>3} 宝石{len(info['gems'])} 血{len(info['blood'])}{wtag}")
         _bb_memo = {}                       # id(state)->(state_ref, extra)：beam_select 每点多次调 score_fn，
-        def beam_score_extra(s):            # pull_big 每调跑一次全图 Dijkstra；按对象 memo（拿光大件后早退近零成本）
+        def beam_score_extra(s):            # pull_big/door_pull 每调跑全图 Dijkstra；按对象 memo（拿光大件后早退近零成本）
             hit = _bb_memo.get(id(s))
             if hit is not None and hit[0] is s:
                 return hit[1]
-            # 引导侧 = β_big·pull_大件(在场折扣引导) + G(满额兑现拿取奖励，大件+小宝石已拿走)。
+            # 引导侧 = β_big·pull_大件(在场折扣引导) + G(满额兑现拿取奖励) + γ·door_pull(门后价值·门锚定全臂梯度)。
             v = _beta_big * pull_big(_bb_zone, roster, s, _big_cells) if _beta_big else 0.0
             v += pickup_bonus(s, _bonus_table)
+            if _gamma_door:                 # γ=0 → 跳过 → 与 β_big/β_small 路字节零回归
+                v += door_pull(_bb_zone, s, _door_reward, _gamma_door)
             _bb_memo[id(s)] = (s, v)
             return v
 
