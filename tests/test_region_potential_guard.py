@@ -126,6 +126,7 @@ def test_future_potential_nonneg_and_monotone_in_atk(roster, battery):
 
 # ───────────────── 命门②·最强：λ=0 search 与 future=None 逐字段同结果 ─────────────────
 
+@pytest.mark.slow
 def test_search_byte_identical_no_future_vs_lam0(roster):
     """最强命门：在 κ=1/区势能真正作恶的 beam 截断层，beam_future=None 与 FutureCfg(roster,0.0)
        跑 search_quotient 必须逐字段同结果（λ=0 字节零回归）。

@@ -103,6 +103,7 @@ def test_equiv_hp_extra_none_byte_identical(roster, battery):
         assert a == b, f"equiv_hp extra=None 非零回归(floor={s.current_floor})"
 
 
+@pytest.mark.slow
 def test_search_extra_none_byte_identical(roster):
     """最强命门：region λ 打分路上，beam_score_extra=None 与不传必须跑出逐字段同结果（结合 off=零回归）。
     小 cap+小 beam、目标楼梯不可达→穷尽探索撞 cap、覆盖大量截断决策。"""

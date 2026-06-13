@@ -132,6 +132,7 @@ def test_pull_nonneg_and_gated(zone, battery):
             assert pl == 0.0, f"区外/已胜 boss 仍 pull={pl}(floor={s.current_floor})"
 
 
+@pytest.mark.slow
 def test_search_byte_identical_kappa0_vs_beta0():
     """最强命门：在 κ=1 真正作恶的 beam 截断层，旧打分(v_zone_score κ=0) 与
        新打分(beam_rank_score β=0) 跑 search_quotient 必须逐字段同结果。
