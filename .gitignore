@@ -22,6 +22,9 @@ __pycache__/
 # Claude Code 本地配置（不入库）
 .claude/
 
+# navigate_to 持久化缓存桶（跨 run 复用·体积大·按版本指纹自动失效重建·不入仓）
+cache/
+
 # 搜索/重放临时产物（每次跑都生成、不入仓）
 *.log
 *.jsonl

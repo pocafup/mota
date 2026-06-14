@@ -285,10 +285,12 @@ def build_min_pool(big_cells, ranked, cands):
     return pool, meta
 
 
-def build_harness():
+def build_harness(*, persistent=False):
     """组装 GA 电池组：decode 起点（build_start MT3 自由态·detectors 同源 ref）+ fitness 标尺
     （复刻 tests/test_fitness 的 roster/big/zone_fids → GA 最优分与 fitness(689) 同尺直接可比）+ 最小目标池。
-    重 import / route 回放全在此函数内（import ga_loop 不触发 build_start 重放，保单测轻量）。"""
+    重 import / route 回放全在此函数内（import ga_loop 不触发 build_start 重放，保单测轻量）。
+    persistent：False（默认）→ navigate_to 用自建内存 dict（与现状字节一致·零回归）；True → 注入
+      PersistentNavCache（跨 run 落盘·深目标全局只冷算一次·§S13 拆成本墙）。开/关只改耗时不改结果。"""
     import json
 
     from probe_crossfloor import build_start
@@ -332,8 +334,12 @@ def build_harness():
     cands, info_key = detect_key_targets(start, zone_fids)
     pool, meta = build_min_pool(big_cells, ranked, cands)
 
+    decode_cache_in = None
+    if persistent:
+        from nav_cache import PersistentNavCache
+        decode_cache_in = PersistentNavCache()
     eval_fn, decode_cache = make_decode_fitness_eval(
-        start, zone, step, roster_fit, big, zone_fids)
+        start, zone, step, roster_fit, big, zone_fids, decode_cache=decode_cache_in)
 
     return dict(start=start, zone=zone, step=step, pool=pool, meta=meta, ranked=ranked,
                 big_cells=big_cells, cands=cands, info_key=info_key,
@@ -348,9 +354,10 @@ def main():
     except Exception:
         pass
 
-    print("组装 GA 电池组（build_start 重放开局 + 标尺 route 回放 + 目标池涌现）…")
+    persistent = "--persistent" in sys.argv
+    print(f"组装 GA 电池组（build_start 重放开局 + 标尺 route 回放 + 目标池涌现 · persistent={persistent}）…")
     t0 = time.time()
-    H = build_harness()
+    H = build_harness(persistent=persistent)
     print(f"  电池组就绪 {time.time() - t0:.1f}s")
 
     pool, meta = H["pool"], H["meta"]
@@ -397,6 +404,10 @@ def main():
     print(f"\n  解码终态: {final.current_floor}({fh.x},{fh.y}) HP={fh.hp} ATK={fh.atk} "
           f"DEF={fh.def_} keys={dict(fh.keys)}  tokens={len(tokens)}")
     print(f"  最优 fitness = {res.best_fitness:.1f}   (对照 fitness(689)={f689:.1f})")
+
+    dc = H["decode_cache"]
+    if hasattr(dc, "stats"):
+        print(f"\n  navigate_to 持久化缓存: 桶={dc.version_tag}  {dc.stats}")
 
 
 if __name__ == "__main__":
