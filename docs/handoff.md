@@ -94,8 +94,8 @@
 - **★分步纪律**：navigate_to 是**地基件**，先单独把吸收语义改对+重验（**5 个人手验证重绿、缓存没坏**）→ 证对后**下棒再**动 decode/基因支持显式 `pickup_key`/`pickup_potion` 目标。**两步别混**。
 - **验证门重估**：**A vs B 仍有效**（两条真不同路线、留潜力>耗资源方向对）；**A vs C 作废**（同路径道具顺序被贪婪吸收架空）。
 
-### §S9 钥匙目标线：三分口径已定、待实现detect_key_targets（本 session·2026-06-13）
-> 本 session **只定义、未实现 detect_key_targets、未跑 GA**；以下为下个 session 的完整起点（照抄定义结论）。
+### §S9 钥匙目标线：detect_key_targets已实现(44候选/三分全中/689式验证门走通/185绿)（2026-06-13）
+> **【2026-06-13 已实现·commit cc73094】** detect_key_targets 落地、44 候选三分全中、689 式验证门走通、185 绿零回归。下方【三分口径】保留作口径事实来源、【已实现】块附验证 chromosome 解码结果作下棒参照。**GA 主循环/种群仍未写（分步纪律）。**
 
 **【根因回顾】** 上一棒(路2只改navigate_to吸收)暴露：钥匙是路径必需资源(要钥匙开门才到得了目标)，禁吸会让navigate_to对所有门后目标失能。绕一圈后定论：钥匙不该禁吸——顺路钥匙照吸(最优)，真问题是"代价型钥匙(要打守怪取)进不了基因目标池"，这正是ga_design.md钉死点1早写好、一直没补的pickup_key一等目标。
 
@@ -107,12 +107,14 @@
 - ③够不到3把(MT2(3,4)(3,5)(4,4))：黄钥但被铁门锁死、铁钥一区拿不到→door-wise每条路都断→不进池。MT2自然落③是修了"FULL afford乐观假装铁门能开"那个bug的结果，非"MT2特判"。
 - 判据"门色∉afford闭包"全数据滚出、零硬编码、换塔自动重算=塔无关。③只锁门(铁钥拿不到=硬结构、与属性无关)，守怪可行性留runtime(navigate_to到不了=reached False/decode跳过)，不预判。
 
-**【下个session要做的实现(本session未做)】**
-1. 实现detect_key_targets(独立新函数、塔无关、真实afford闭包、产候选池②=44、只产候选不决定取舍)。
-2. 不写GA主循环/种群(分步)。手搓chromosome=[盾,MT4钥匙(s),门后目标]验证门：decode串出"先盾→打MT4守怪取3钥匙(DEF已就位损血少)→开后门"的完整合法可重放路线、物理先盾后钥匙；对比现状目标池无钥匙表达不出。
-3. beam零影响(detect_big_items一字不改)。做完dump候选44把(MT4在/MT2不在/顺路不在)+689式路线给玩家看，不commit先确认。
+**【已实现(2026-06-13·commit cc73094·185绿零回归)】**
+1. ✅ detect_key_targets(extract/key_targets.py·独立新函数·塔无关·真实afford闭包·产候选池②=44·只产候选不决定取舍)。实测三分全中：afford={黄,蓝,红}(铁钥不在)、59=顺路12+候选44+够不到3、MT4六钥全在候选、MT2三钥全在够不到、顺路∩候选=∅、三分无交叠且并==全集、与probe_key_targets.triage四项(候选/顺路/够不到/afford)全一致。
+2. ✅ 验证门chromosome=[('MT9',9,7)盾, MT4六钥(2,1)(3,2)(3,11)(5,10)(5,11)(9,2), ('MT5',11,11)剑]，8 goal全reached=True。**decode终态 MT5(11,11) HP=212 ATK=23 DEF=21 keys={yellow:2,blue:1} tokens=810、钥匙净增3**。四铁律过：引擎可重放(重放终态==decode终态)、物理先盾后钥匙(盾step240<首MT4钥step445)、≥3钥真取到、用钥开后门(DEF10→20@step240 + 多处KEYS减少开门事件)。早期step10-19在MT3捡6钥是①顺路白捡(非MT4候选)、印证三分区分成立。
+3. ✅ beam零影响(detect_big_items/navigate_to/decode/fitness一字未动·git确认无追踪文件改动)。配套tests/test_key_targets.py 11测(7三分+4 gate)、analysis/ga_keytargets_diag.py 诊断器(三分对账+验证门解码 dump)。
 
-**【其余状态】** 血瓶潜力控制还没做(血瓶非路径必需、不阻塞，留更后面)；navigate_to的skip_potential参数上一棒撤回了禁吸、钥匙恢复照吸=健康基线7绿。A vs B验证门有效、A vs C作废(吸收语义缺陷暴露)。
+**【下个session起点】** pickup_key 候选池已就位但 **GA 主循环/种群还没写**(分步纪律)。下棒：动 decode/基因支持显式 pickup_key 目标 + 写 GA 主循环，让基因从 `detect_big_items ∪ detect_key_targets` 的并池选目标。上面那条验证 chromosome 可直接当下棒的参照样本(已知合法可重放·先盾后钥匙·净增3钥)。
+
+**【其余状态】** 血瓶潜力控制还没做(血瓶非路径必需、不阻塞，留更后面)；navigate_to的skip_potential参数上一棒撤回了禁吸、钥匙恢复照吸=健康基线。A vs B验证门有效、A vs C作废(吸收语义缺陷暴露)。
 
 ---
 
