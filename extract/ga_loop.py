@@ -27,6 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))   # solver / sim
 sys.path.insert(0, str(Path(__file__).resolve().parent))           # ga_decode / vzone 同目录
 
 from ga_decode import decode                       # noqa: E402
+from ga_navigate import navigate_to                # noqa: E402（规整层复刻 decode 的目标串需直接调）
 from solver.fitness import fitness                 # noqa: E402
 
 
@@ -170,19 +171,74 @@ def run_ga(pool, eval_fn, *, population=12, generations=6, tournament_k=3,
     return GAResult(gen_best, best[1], best[0], len(fit_cache), history)
 
 
+# ─── 解码后规整（§S12 自欺序列真解·必做层）──────────────────────────────────────────
+# 病：navigate_to 走向某目标会【顺路吸】路径上的别的目标（剑/顺路宝石）——GA 以为在搜「剑排第几」，
+#   实际剑总被顺路吸、排第几 decode 终态都一样＝自欺序列（§S11）。但「剑早拿」在【无盾解】里有真实价值
+#   （Δ+16826，§S12 铁证）＝不能剔剑。真解＝解码后【规整】：把基因目标按【真正进包的全局先后序】排成
+#   normalized_order，等价基因（同进包序→同终态）共享 fitness 缓存去重——含盾 [盾,剑]≡[剑,盾] 折叠、
+#   无盾 [剑,5钥]≠[5钥,剑] 不折叠。规整【不改 fitness 值】（终态本就同→分本就等）、只省重复评估。
+# 红线：封板件（decode/navigate_to/fitness/detect_*）一字不改；规整只在此 eval 层复刻 decode 的目标串、
+#   旁加进包追踪；不剔目标、不写死顺序；beam 零影响（本文件 GA 专用、beam 不 import）。
+
+def _taken(state, cell):
+    """目标格是否已空（道具被拿走＝已进包）。复刻 analysis/ga_sword_order_fitness_check.py 的同名判定：
+    entities[y][x]==0 ＝ 该格无实体 ＝ 道具已被吸。"""
+    fid, x, y = cell
+    fl = state.floors.get(fid)
+    return fl is not None and fl.entities[y][x] == 0
+
+
+def _decode_with_order(chromosome, start_state, zone, step_fn, cache, *, max_pops=8000):
+    """复刻封板 decode 的逐目标 navigate_to 串（decode 一字不改），额外产 normalized_order ＝ 基因目标
+    【真正进包的全局先后序】。终态【必与 decode(...) 逐字段一致】（tests/test_ga_normalize_guard 钉死）。
+      进包判定（复刻验证脚本的腿级 _taken）：一腿 navigate_to 前后，某基因目标格由「有」变「空」＝这一腿进包。
+      腿内序：顺路吸的（非本腿 goal）排前、本腿 goal 排后——顺路道具物理上必在走到 goal【之前】被踩，
+        进包时序「顺路 < goal」是硬事实（非脆弱 tiebreak）；多个顺路按 cell 排序（确定性、保去重稳定）。
+    返回 (tokens, final_state, normalized_order: tuple[cell])。"""
+    targets = list(chromosome)                      # 基因目标（钉死点 1：本就无重复有序）
+    state = start_state
+    tokens = []
+    taken = {t: _taken(state, t) for t in targets}  # 已进包的目标（起点一般全 False）
+    normalized = []
+    for goal in chromosome:
+        if state.dead or state.won:                 # 与 decode 同：死亡/通关冻结即停
+            break
+        final, moves, reached = navigate_to(
+            state, goal, zone, step_fn, max_pops=max_pops, cache=cache)
+        if reached:                                 # 与 decode 同：够不到则原子失败、state 不变、跳过
+            state = final
+            tokens.extend(moves)
+        newly = [t for t in targets if not taken[t] and _taken(state, t)]   # 这一腿新进包（含顺路吸）
+        for t in newly:
+            taken[t] = True
+        side = sorted(t for t in newly if t != goal)   # 顺路吸（非本腿目标）→ 排在 goal 之前·确定性定序
+        normalized.extend(side)
+        if goal in newly:                              # 本腿目标这一步真拿到 → 排在顺路之后
+            normalized.append(goal)
+    return tokens, state, tuple(normalized)
+
+
 # ─── eval 注入：把封板四零件包成 eval_fn（基因→decode→终态→fitness）────────────────────────
 
 def make_decode_fitness_eval(start, zone, step_fn, roster, big, zone_fids, *,
                              w_potion=1.5, w_key=39.0, decode_cache=None):
-    """构造 eval_fn(gene)->fitness：decode(基因)串 navigate_to 跑全程 → fitness 终评。
+    """构造 eval_fn(gene)->fitness：复刻 decode（_decode_with_order 串 navigate_to）跑全程 → fitness 终评。
     decode_cache：navigate_to 缓存（GA 内反复导航同几个目标[尤其 26s 盾] → 命中近免费）。
-      不传则本函数自建一个、整个 GA 共享 → 同(中途态,目标)只冷算一次。返回 (eval_fn, decode_cache)。"""
+      不传则本函数自建一个、整个 GA 共享 → 同(中途态,目标)只冷算一次。返回 (eval_fn, decode_cache)。
+    规整（§S12 必做层）：以 normalized_order（真正进包先后序）为 fitness 缓存键 → 等价基因（同进包序→
+      同终态）只评一次。【不改 fitness 值】：等价基因终态全同→分本就相等，缓存命中返回的就是应得值。"""
     if decode_cache is None:
         decode_cache = {}
+    norm_cache = {}     # normalized_order -> fitness：等价基因评估去重（§S12 必做层）
 
     def eval_fn(gene):
-        _tokens, final = decode(gene, start, zone, step_fn, cache=decode_cache)
-        return fitness(final, roster, big, zone_fids, w_potion=w_potion, w_key=w_key)
+        _tokens, final, normalized = _decode_with_order(
+            gene, start, zone, step_fn, decode_cache)
+        if normalized in norm_cache:                # 等价基因（同进包序）→ 复用、不重算 fitness
+            return norm_cache[normalized]
+        f = fitness(final, roster, big, zone_fids, w_potion=w_potion, w_key=w_key)
+        norm_cache[normalized] = f
+        return f
 
     return eval_fn, decode_cache
 
