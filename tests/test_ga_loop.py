@@ -18,7 +18,7 @@ sys.path.insert(0, str(ROOT / "extract"))
 import pytest
 
 from ga_loop import (
-    _random_individual, _mutate, _tournament, run_ga, GAResult,
+    _random_individual, _mutate, _tournament, _crossover, run_ga, GAResult,
 )
 
 POOL = list(range(8))   # 假 pool：8 个可哈希"目标"（int 当 cell 占位，机器不认 cell 语义）
@@ -190,3 +190,139 @@ def test_result_shape():
     assert len(res.gen_best_fitness) == 5
     assert len(res.gen_history) == 5
     assert all(len(gen) == 10 for gen in res.gen_history)       # 每代记录 population(=10) 个
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# 第二棒新增：OX 变体交叉 _crossover + run_ga 的 crossover_rate / inject 接口
+# （仍全程假 eval_fn 秒级·证交叉算子合法性 + 注入接口 + 交叉下进化机器仍对 + 字节级零回归）
+# ════════════════════════════════════════════════════════════════════════════════
+
+def _is_subsequence(sub, seq):
+    """sub 是否为 seq 的子序列（保相对顺序、可不连续）。"""
+    it = iter(seq)
+    return all(x in it for x in sub)
+
+
+class _StubRng:
+    """受控 rng：randrange→固定 i、randint→固定 j，用于手验 _crossover 确定输出。"""
+    def __init__(self, i, j):
+        self.i, self.j = i, j
+
+    def randrange(self, n):
+        return self.i
+
+    def randint(self, a, b):
+        return self.j
+
+
+# ── _crossover：后代恒合法子集 + 顺序部分继承 ───────────────────────────────────
+def test_crossover_always_valid_subset():
+    rng = random.Random(10)
+    for _ in range(500):
+        p1 = _random_individual(POOL, rng)
+        p2 = _random_individual(POOL, rng)
+        child = _crossover(p1, p2, POOL, rng)
+        assert _is_valid_subset(child, POOL)
+
+
+def test_crossover_deterministic_example():
+    """手验确定例：p1=[0,1,2,3] i=1 j=3→seg=[1,2]；p2=[2,4,0,5]→rest=[4,0,5]；k=1→child=[4,1,2,0,5]。"""
+    child = _crossover([0, 1, 2, 3], [2, 4, 0, 5], POOL, _StubRng(1, 3))
+    assert child == [4, 1, 2, 0, 5]
+    assert child[1:3] == [1, 2]                                  # seg 原样连续(保 p1 序)
+    assert [g for g in child if g not in (1, 2)] == [4, 0, 5]    # rest 保 p2 序
+
+
+def test_crossover_inherits_parent_orders():
+    """不相交父 → rest=全 p2(保序)、seg=p1 连续段(p1 子序列)：顺序部分继承的不变式。"""
+    rng = random.Random(11)
+    p1, p2 = [0, 1, 2], [3, 4, 5]
+    for _ in range(200):
+        child = _crossover(p1, p2, POOL, rng)
+        assert _is_valid_subset(child, POOL)
+        assert [g for g in child if g in (3, 4, 5)] == [3, 4, 5]     # rest=p2 全员保序
+        seg = [g for g in child if g in (0, 1, 2)]
+        assert _is_subsequence(seg, p1)                             # seg 是 p1 子序列(连续段)
+
+
+def test_crossover_does_not_mutate_inputs():
+    rng = random.Random(12)
+    for _ in range(200):
+        p1 = _random_individual(POOL, rng)
+        p2 = _random_individual(POOL, rng)
+        s1, s2 = list(p1), list(p2)
+        _crossover(p1, p2, POOL, rng)
+        assert p1 == s1 and p2 == s2                                # 入参原样
+
+
+def test_crossover_identical_parents_same_set():
+    """p1==p2 → 后代是同元素集的重排(seg∪rest=p)、合法、无重。"""
+    rng = random.Random(13)
+    for _ in range(200):
+        p = _random_individual(POOL, rng)
+        child = _crossover(p, list(p), POOL, rng)
+        assert _is_valid_subset(child, POOL)
+        assert set(child) == set(p)
+
+
+# ── run_ga + crossover_rate：交叉下进化机器仍对 ─────────────────────────────────
+def test_run_ga_crossover_climbs_and_monotonic():
+    ev = _ordered_target_eval(list(POOL))
+    res = run_ga(POOL, ev, population=20, generations=30, elite=2,
+                 crossover_rate=0.7, seed=20260613)
+    gb = res.gen_best_fitness
+    assert all(gb[i + 1] >= gb[i] for i in range(len(gb) - 1)), gb   # 精英单调不降
+    assert gb[-1] > gb[0], gb                                        # 真爬坡
+    assert _is_valid_subset(res.best_individual, POOL)               # 交叉后代仍合法
+
+
+def test_reproducible_with_crossover():
+    ev = _ordered_target_eval(list(POOL))
+    a = run_ga(POOL, ev, population=16, generations=15, crossover_rate=0.7, seed=77)
+    b = run_ga(POOL, ev, population=16, generations=15, crossover_rate=0.7, seed=77)
+    assert a.gen_best_fitness == b.gen_best_fitness
+    assert a.best_individual == b.best_individual
+    assert a.n_unique_evals == b.n_unique_evals
+
+
+def test_crossover_rate_zero_byte_identical():
+    """crossover_rate=0(默认) 字节级零回归：>0 判定短路、不消耗 rng → 与不传 crossover_rate 全同。"""
+    ev = _ordered_target_eval(list(POOL))
+    a = run_ga(POOL, ev, population=16, generations=15, seed=2024)
+    b = run_ga(POOL, ev, population=16, generations=15, crossover_rate=0.0, seed=2024)
+    assert a.gen_best_fitness == b.gen_best_fitness
+    assert a.best_individual == b.best_individual
+    assert a.n_unique_evals == b.n_unique_evals
+    assert [g for _, g in a.gen_history[-1]] == [g for _, g in b.gen_history[-1]]
+
+
+# ── inject：注入个体进初始种群 ───────────────────────────────────────────────────
+def test_inject_present_in_initial_population():
+    ev = _ordered_target_eval(list(POOL))
+    seed_ind = [5, 3, 1]
+    res = run_ga(POOL, ev, population=12, generations=1, inject=[seed_ind], seed=5)
+    assert seed_ind in [g for _, g in res.gen_history[0]]            # 注入个体在初代种群
+
+
+def test_inject_high_fitness_retained_by_elitism():
+    """注入合成最优(target 全序) → 初代最优即它、精英保住 → 全程最优==它的分。"""
+    target = list(POOL)
+    ev = _ordered_target_eval(target)
+    res = run_ga(POOL, ev, population=12, generations=10,
+                 inject=[list(target)], elite=2, seed=9)
+    assert res.gen_best_fitness[0] == ev(target)                    # 初代就含最优
+    assert res.best_fitness == ev(target)                           # 精英保住、无更高
+
+
+def test_inject_invalid_raises():
+    ev = _ordered_target_eval(list(POOL))
+    for bad in ([[0, 0, 1]], [[0, 1, 99]], [[]]):                   # 重复 / ∉pool / 空
+        with pytest.raises(AssertionError):
+            run_ga(POOL, ev, population=8, generations=2, inject=bad, seed=1)
+
+
+def test_inject_exceeding_population_raises():
+    ev = _ordered_target_eval(list(POOL))
+    with pytest.raises(AssertionError):
+        run_ga(POOL, ev, population=4, generations=2,
+                inject=[[i] for i in range(5)], seed=1)             # 5 注入 > 4 种群

@@ -72,6 +72,24 @@ def _tournament(pop_scored, k, rng):
     return list(max(cands, key=lambda fs: fs[0])[1])
 
 
+def _crossover(p1, p2, pool, rng):
+    """OX 顺序交叉的【变长无重复子集】适配变体（标准 OX/PMX 是给等长同元素全排列设计的，
+    这里两父代是 pool 的不同子集、元素集可能不同 → 套 PMX 位置映射会语义崩坏：引入重复或退化）。
+      ① 从 p1 取一段连续子序列 seg（继承 p1 相对顺序、len≥1）；
+      ② 从 p2 按序取出所有不在 seg 里的目标 rest（继承 p2 相对顺序、与 seg 必不重）；
+      ③ 后代 = rest[:k] + seg + rest[k:]（seg 回到它在 p1 的相对位置 k=min(i,len(rest))）。
+    后代元素 ⊆ pool、无重复、长度自然变化、seg 保 p1 序 / rest 保 p2 序 → 必合法子集、必可解码。
+    不改入参（p1 拷贝、p2 只读、返回全新 list）。"""
+    p1 = list(p1)
+    i = rng.randrange(len(p1))
+    j = rng.randint(i + 1, len(p1))
+    seg = p1[i:j]
+    seg_set = set(seg)
+    rest = [g for g in p2 if g not in seg_set]
+    k = min(i, len(rest))
+    return rest[:k] + seg + rest[k:]
+
+
 # ─── GA 主循环 ────────────────────────────────────────────────────────────────────
 
 @dataclass
@@ -83,11 +101,26 @@ class GAResult:
     gen_history: list = field(default_factory=list)   # 每代 [(fit, gene), ...] 排序快照（诊断用）
 
 
+@dataclass
+class GenLog:
+    """每代进度快照（run_ga 每代把它传给 log 回调）。run_ga 塔无关、只把 best_individual 原样交出——
+    认不认得「盾/剑」是【调用方】的事：诊断侧据此自渲染「含盾」标记，引擎侧绝不内嵌塔知识。"""
+    gen: int                        # 代号（0..generations-1）
+    best_individual: list           # 该代最优基因（副本）
+    best_fitness: float             # 该代最优 fitness
+    n_unique_evals: int             # 累计真 decode+评分去重数（缓存命中观察）
+    spread_lo: float                # 该代种群最差 fitness（多样性下沿）
+    spread_hi: float                # 该代种群最优 fitness（=best_fitness）
+
+
 def run_ga(pool, eval_fn, *, population=12, generations=6, tournament_k=3,
-           elite=2, seed=20260613, log=None):
+           elite=2, crossover_rate=0.0, inject=None, seed=20260613, log=None):
     """最小 GA 主循环（见模块头）。pool=目标 cell 列表；eval_fn(gene)->fitness。返回 GAResult。
     fitness 缓存按基因元组去重（同基因不重复评估·decode 贵）。固定 seed 可复现。
-    log: 可选 callable(str)，每代打印进度。"""
+    crossover_rate: 0=纯变异(默认·字节级零回归——>0 判定短路、不消耗 rng)；>0 则每个后代以此概率两父 OX 交叉。
+    inject: 可选 [基因,...] 注入初始种群（须是 pool 非空无重复子集、数≤population），其余随机填充。
+    log: 可选 callable(GenLog)，每代回调一次进度（GenLog 带 gen/best_individual/best_fitness/…）；
+         run_ga 塔无关、不认盾/剑 → 「含盾」等标记由调用方在回调里自加。"""
     if not pool:
         raise ValueError("pool 不能为空")
     rng = random.Random(seed)
@@ -99,7 +132,14 @@ def run_ga(pool, eval_fn, *, population=12, generations=6, tournament_k=3,
             fit_cache[key] = eval_fn(ind)
         return fit_cache[key]
 
-    pop = [_random_individual(pool, rng) for _ in range(population)]
+    pool_set = set(pool)
+    seeded = []
+    for ind in (inject or []):
+        assert ind and len(ind) == len(set(ind)) and all(g in pool_set for g in ind), \
+            f"注入个体须是 pool 的非空无重复子集，违例: {ind}"
+        seeded.append(list(ind))
+    assert len(seeded) <= population, f"注入个体数 {len(seeded)} > 种群 {population}"
+    pop = seeded + [_random_individual(pool, rng) for _ in range(population - len(seeded))]
     gen_best = []
     history = []
     best = (float("-inf"), None)
@@ -112,14 +152,19 @@ def run_ga(pool, eval_fn, *, population=12, generations=6, tournament_k=3,
         if gbest_fit > best[0]:
             best = (gbest_fit, list(gbest_ind))
         if log:
-            log(f"  gen {g}: best={gbest_fit:>12.1f}  len={len(gbest_ind):2d}  "
-                f"uniq_evals={len(fit_cache):3d}  pop_spread=[{scored[-1][0]:.0f}..{scored[0][0]:.0f}]")
+            log(GenLog(g, list(gbest_ind), gbest_fit, len(fit_cache),
+                       scored[-1][0], scored[0][0]))
         if g == generations - 1:
             break
-        # 下一代：精英原样保留 + 锦标赛选父→单点变异
+        # 下一代：精英原样保留 + 锦标赛选父→(按 crossover_rate 两父交叉)→单点变异
         nxt = [list(scored[i][1]) for i in range(min(elite, len(scored)))]
         while len(nxt) < population:
-            nxt.append(_mutate(_tournament(scored, tournament_k, rng), pool, rng))
+            if crossover_rate > 0 and rng.random() < crossover_rate:
+                child = _crossover(_tournament(scored, tournament_k, rng),
+                                   _tournament(scored, tournament_k, rng), pool, rng)
+            else:
+                child = _tournament(scored, tournament_k, rng)
+            nxt.append(_mutate(child, pool, rng))
         pop = nxt
 
     return GAResult(gen_best, best[1], best[0], len(fit_cache), history)
@@ -264,7 +309,11 @@ def main():
     print("=" * 74)
     t1 = time.time()
     res = run_ga(pool, H["eval_fn"], population=12, generations=6,
-                 tournament_k=3, elite=2, seed=20260613, log=print)
+                 tournament_k=3, elite=2, seed=20260613,
+                 log=lambda gl: print(
+                     f"  gen {gl.gen}: best={gl.best_fitness:>12.1f}  len={len(gl.best_individual):2d}  "
+                     f"uniq_evals={gl.n_unique_evals:3d}  "
+                     f"pop_spread=[{gl.spread_lo:.0f}..{gl.spread_hi:.0f}]"))
     dt = time.time() - t1
     print(f"\n  ▸ 每代最优 gen_best = {[round(x, 1) for x in res.gen_best_fitness]}")
     climb = res.gen_best_fitness[-1] - res.gen_best_fitness[0]
