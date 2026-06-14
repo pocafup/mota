@@ -221,12 +221,16 @@ def _decode_with_order(chromosome, start_state, zone, step_fn, cache, *, max_pop
 # ─── eval 注入：把封板四零件包成 eval_fn（基因→decode→终态→fitness）────────────────────────
 
 def make_decode_fitness_eval(start, zone, step_fn, roster, big, zone_fids, *,
-                             w_potion=1.5, w_key=39.0, decode_cache=None):
+                             w_potion=1.5, w_key=39.0, decode_cache=None,
+                             normalize=True, stats=None):
     """构造 eval_fn(gene)->fitness：复刻 decode（_decode_with_order 串 navigate_to）跑全程 → fitness 终评。
     decode_cache：navigate_to 缓存（GA 内反复导航同几个目标[尤其 26s 盾] → 命中近免费）。
       不传则本函数自建一个、整个 GA 共享 → 同(中途态,目标)只冷算一次。返回 (eval_fn, decode_cache)。
     规整（§S12 必做层）：以 normalized_order（真正进包先后序）为 fitness 缓存键 → 等价基因（同进包序→
-      同终态）只评一次。【不改 fitness 值】：等价基因终态全同→分本就相等，缓存命中返回的就是应得值。"""
+      同终态）只评一次。【不改 fitness 值】：等价基因终态全同→分本就相等，缓存命中返回的就是应得值。
+    normalize=False：旁路 norm_cache（规整【关】·对照诊断用）→ 每个不同基因元组都评 fitness（run_ga 的
+      基因元组缓存仍去重）；默认 True 与现状逻辑等价。stats：可选 dict，旁路计真实 fitness() 冷算次数
+      （stats['fitness_calls']·规整开/关省多少评估的诊断键），默认 None 零开销。两参数仅诊断、不入产品路径。"""
     if decode_cache is None:
         decode_cache = {}
     norm_cache = {}     # normalized_order -> fitness：等价基因评估去重（§S12 必做层）
@@ -234,10 +238,13 @@ def make_decode_fitness_eval(start, zone, step_fn, roster, big, zone_fids, *,
     def eval_fn(gene):
         _tokens, final, normalized = _decode_with_order(
             gene, start, zone, step_fn, decode_cache)
-        if normalized in norm_cache:                # 等价基因（同进包序）→ 复用、不重算 fitness
+        if normalize and normalized in norm_cache:  # 等价基因（同进包序）→ 复用、不重算 fitness
             return norm_cache[normalized]
+        if stats is not None:                       # 诊断计数：真实 fitness() 冷算次数（默认 None 零开销）
+            stats["fitness_calls"] = stats.get("fitness_calls", 0) + 1
         f = fitness(final, roster, big, zone_fids, w_potion=w_potion, w_key=w_key)
-        norm_cache[normalized] = f
+        if normalize:
+            norm_cache[normalized] = f
         return f
 
     return eval_fn, decode_cache
