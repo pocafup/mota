@@ -26,9 +26,19 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))   # solver / sim
 sys.path.insert(0, str(Path(__file__).resolve().parent))           # ga_decode / vzone 同目录
 
-from ga_decode import decode                       # noqa: E402
+from ga_decode import decode, goal_to_cell         # noqa: E402（goal_to_cell：块 id→代表 cell 归一）
 from ga_navigate import navigate_to                # noqa: E402（规整层复刻 decode 的目标串需直接调）
 from solver.fitness import fitness                 # noqa: E402
+
+
+def _dedup(seq):
+    """保序去重（块折叠后多 cell 落同块 → 块 id 列表去重·保执行序）。"""
+    seen, out = set(), []
+    for x in seq:
+        if x not in seen:
+            seen.add(x)
+            out.append(x)
+    return out
 
 
 # ─── 进化算子（全在目标层，保证后代仍是 pool 的无重复有序子集 → 必可解码）────────────────────
@@ -188,30 +198,49 @@ def _taken(state, cell):
     return fl is not None and fl.entities[y][x] == 0
 
 
-def _decode_with_order(chromosome, start_state, zone, step_fn, cache, *, max_pops=8000):
+def _goal_markers(goal, block_markers):
+    """目标的"进包判据 cell 集"：
+      · 块模式（block_markers 给且含 goal）→ 该块折进的全部 pool 物品 cell（detect 吐的真道具格·非空地
+        代表 cell）。块"进包"＝这些 cell 全部被吸（all _taken）——代表 cell 可能是空地、不能拿它判进包。
+      · cell 模式（block_markers=None 或 goal 不在表）→ (goal,)：目标自身一个 cell（封板单物品口径）。"""
+    if block_markers is not None and goal in block_markers:
+        return block_markers[goal]
+    return (goal,)
+
+
+def _decode_with_order(chromosome, start_state, zone, step_fn, cache, *, max_pops=8000,
+                       block_markers=None):
     """复刻封板 decode 的逐目标 navigate_to 串（decode 一字不改），额外产 normalized_order ＝ 基因目标
     【真正进包的全局先后序】。终态【必与 decode(...) 逐字段一致】（tests/test_ga_normalize_guard 钉死）。
-      进包判定（复刻验证脚本的腿级 _taken）：一腿 navigate_to 前后，某基因目标格由「有」变「空」＝这一腿进包。
+      进包判定（复刻验证脚本的腿级 _taken）：一腿 navigate_to 前后，某目标的【判据 cell 全部】由「有」变
+        「空」＝这一腿进包。cell 模式判据 = 目标自身；块模式判据 = 该块折进的全部 pool 物品 cell（_goal_markers）。
       腿内序：顺路吸的（非本腿 goal）排前、本腿 goal 排后——顺路道具物理上必在走到 goal【之前】被踩，
-        进包时序「顺路 < goal」是硬事实（非脆弱 tiebreak）；多个顺路按 cell 排序（确定性、保去重稳定）。
-    返回 (tokens, final_state, normalized_order: tuple[cell])。"""
-    targets = list(chromosome)                      # 基因目标（钉死点 1：本就无重复有序）
+        进包时序「顺路 < goal」是硬事实（非脆弱 tiebreak）；多个顺路按 cell/块 id 排序（确定性、保去重稳定）。
+    block_markers（块为目标）：{块 id: frozenset(pool 物品 cell)}。给则按块判进包、normalized 为块 id 序；
+      不给（None）→ cell 模式、与封板单物品口径【字节一致】（targets/normalized 皆为 cell）。
+    返回 (tokens, final_state, normalized_order: tuple[目标])。"""
+    targets = list(chromosome)                      # 基因目标（钉死点 1：本就无重复有序）；cell 或块 id
+    markers = {g: _goal_markers(g, block_markers) for g in targets}
+
+    def _is_taken(g, st):
+        return all(_taken(st, c) for c in markers[g])   # 块模式=整块物品全吸；cell 模式=该 cell 已空
+
     state = start_state
     tokens = []
-    taken = {t: _taken(state, t) for t in targets}  # 已进包的目标（起点一般全 False）
+    taken = {g: _is_taken(g, state) for g in targets}   # 已进包的目标（起点一般全 False）
     normalized = []
     for goal in chromosome:
         if state.dead or state.won:                 # 与 decode 同：死亡/通关冻结即停
             break
-        final, moves, reached = navigate_to(
-            state, goal, zone, step_fn, max_pops=max_pops, cache=cache)
+        final, moves, reached = navigate_to(        # 块 id→代表 cell 归一（封板件 navigate_to 不动）
+            state, goal_to_cell(goal), zone, step_fn, max_pops=max_pops, cache=cache)
         if reached:                                 # 与 decode 同：够不到则原子失败、state 不变、跳过
             state = final
             tokens.extend(moves)
-        newly = [t for t in targets if not taken[t] and _taken(state, t)]   # 这一腿新进包（含顺路吸）
-        for t in newly:
-            taken[t] = True
-        side = sorted(t for t in newly if t != goal)   # 顺路吸（非本腿目标）→ 排在 goal 之前·确定性定序
+        newly = [g for g in targets if not taken[g] and _is_taken(g, state)]   # 这一腿新进包（含顺路吸）
+        for g in newly:
+            taken[g] = True
+        side = sorted(g for g in newly if g != goal)   # 顺路吸（非本腿目标）→ 排在 goal 之前·确定性定序
         normalized.extend(side)
         if goal in newly:                              # 本腿目标这一步真拿到 → 排在顺路之后
             normalized.append(goal)
@@ -222,7 +251,7 @@ def _decode_with_order(chromosome, start_state, zone, step_fn, cache, *, max_pop
 
 def make_decode_fitness_eval(start, zone, step_fn, roster, big, zone_fids, *,
                              w_potion=1.5, w_key=39.0, decode_cache=None,
-                             normalize=True, stats=None):
+                             normalize=True, stats=None, block_markers=None):
     """构造 eval_fn(gene)->fitness：复刻 decode（_decode_with_order 串 navigate_to）跑全程 → fitness 终评。
     decode_cache：navigate_to 缓存（GA 内反复导航同几个目标[尤其 26s 盾] → 命中近免费）。
       不传则本函数自建一个、整个 GA 共享 → 同(中途态,目标)只冷算一次。返回 (eval_fn, decode_cache)。
@@ -237,7 +266,7 @@ def make_decode_fitness_eval(start, zone, step_fn, roster, big, zone_fids, *,
 
     def eval_fn(gene):
         _tokens, final, normalized = _decode_with_order(
-            gene, start, zone, step_fn, decode_cache)
+            gene, start, zone, step_fn, decode_cache, block_markers=block_markers)
         if normalize and normalized in norm_cache:  # 等价基因（同进包序）→ 复用、不重算 fitness
             return norm_cache[normalized]
         if stats is not None:                       # 诊断计数：真实 fitness() 冷算次数（默认 None 零开销）
@@ -256,33 +285,69 @@ MIN_GEMS = [("MT1", 7, 3), ("MT1", 7, 4), ("MT4", 7, 10)]   # 攻/防/攻·均 n
 EXCLUDE_DEEP_KEY = ("MT4", 9, 2)   # 实测 navigate_to 18.2s 冷算·本最小棒排除以降总耗时（非"它不是目标"，下棒可放回）
 
 
-def build_min_pool(big_cells, ranked, cands):
-    """从【封板涌现器输出】裁出最小目标池（玩家 2026-06-13 拍板·10 目标），每个目标 assert 回溯到
+def build_min_pool(big_cells, ranked, cands, block_index):
+    """从【封板涌现器输出】裁出最小目标池（玩家 2026-06-13 拍板·10 物品 cell），每个 cell assert 回溯到
     detect_big_items / detect_key_targets 真涌现 cell —— 绝不手写裸坐标（塔无关红线 + 不擅自造目标）：
       · 剑/盾   : detect_big_items.big_cells 里 da>0 / dd>0 的大件（689 轴心·盾深 26s）。
       · MT4 钥  : detect_key_targets ② 候选里的 MT4 六钥【排除深 (9,2)】= 5 把（从 cands 直接筛 → 必是子集）。
       · 小宝石  : ranked 里 MIN_GEMS 三个顺路攻防宝石（assert ∈ ranked 且 ∉ big_cells → 真小宝石）。
-    返回 (pool, meta)；meta 标注每目标来源供 dump。"""
+    ★块为目标（§S18 步②）：detect 吐的 cell 口径【一字不改】（守 beam 零影响——detect 函数体不动），算出 10
+      个 cell 后经 block_index 折成所属【初始块 id】、保序去重 → pool = 块 id 列表（同块 cell 合并·五钥归并）。
+    返回 (pool, meta, block_markers)：
+      · pool         : 块 id 有序去重列表（GA 基因元素）；
+      · meta         : 角色→块 id（sword/shield/keys/gems）+ cells（原 cell 来源）+ block_roles/rep/cells（dump 用）；
+      · block_markers: {块 id: frozenset(该块折进的 pool 物品 cell)} —— 规整进包判据（块"进包"＝整块物品全吸）。"""
     ranked_cells = {c for (_drp, c, _da, _dd) in ranked}
-    sword = next((c for (_drp, c, da, _dd) in ranked if c in big_cells and da > 0), None)
-    shield = next((c for (_drp, c, _da, dd) in ranked if c in big_cells and dd > 0), None)
-    assert sword is not None and shield is not None, f"big_cells 缺剑/盾: {sorted(big_cells)}"
+    sword_c = next((c for (_drp, c, da, _dd) in ranked if c in big_cells and da > 0), None)
+    shield_c = next((c for (_drp, c, _da, dd) in ranked if c in big_cells and dd > 0), None)
+    assert sword_c is not None and shield_c is not None, f"big_cells 缺剑/盾: {sorted(big_cells)}"
 
     mt4_keys = sorted(c for c in cands if c[0] == "MT4")
     assert len(mt4_keys) == 6, f"detect_key_targets 的 MT4 候选钥应为 6（§S9），实得 {len(mt4_keys)}: {mt4_keys}"
     assert EXCLUDE_DEEP_KEY in mt4_keys, f"待排除深钥 {EXCLUDE_DEEP_KEY} 不在候选 → 坐标失效，请重核"
-    keys = [c for c in mt4_keys if c != EXCLUDE_DEEP_KEY]
-    assert len(keys) == 5
+    keys_c = [c for c in mt4_keys if c != EXCLUDE_DEEP_KEY]
+    assert len(keys_c) == 5
 
     for g in MIN_GEMS:
         assert g in ranked_cells, f"宝石 {g} 不在 detect_big_items 涌现池 → 坐标失效"
         assert g not in big_cells, f"宝石 {g} 落进 big_cells（应是小宝石非大件）"
-    gems = list(MIN_GEMS)
+    gems_c = list(MIN_GEMS)
 
-    pool = [sword, shield] + keys + gems
-    assert len(pool) == len(set(pool)) == 10, f"池应为 10 个不重 cell，实得 {pool}"
-    meta = {"sword": sword, "shield": shield, "keys": keys, "gems": gems}
-    return pool, meta
+    cell_pool = [sword_c, shield_c] + keys_c + gems_c
+    assert len(cell_pool) == len(set(cell_pool)) == 10, f"cell 池应为 10 个不重 cell，实得 {cell_pool}"
+
+    # ── 折叠：每 detect cell → 所属初始块 id（detect 不变·块层只叠在其输出之上）──
+    c2b = block_index["cell_to_block"]
+    missing = [c for c in cell_pool if c not in c2b]
+    assert not missing, (f"目标 cell {missing} 不在任何初始块（非自由格？被守怪/门/墙挡）——"
+                         f"须人工核对，绝不静默丢（CLAUDE.md 不猜）")
+
+    def bid(c):
+        return c2b[c]
+
+    sword, shield = bid(sword_c), bid(shield_c)
+    keys = _dedup([bid(c) for c in keys_c])     # 五钥可能归并同块 → 去重
+    gems = _dedup([bid(c) for c in gems_c])
+    pool = _dedup([sword, shield] + keys + gems)
+    assert pool and len(pool) == len(set(pool)), f"块 id 池应非空无重复，实得 {pool}"
+
+    # block_markers（规整进包判据）+ 来源标注（dump 用）：每块折进了哪些 pool 物品 cell
+    block_markers, block_roles = {}, {}
+    for c, role in ([(sword_c, "剑"), (shield_c, "盾")]
+                    + [(c, "钥") for c in keys_c] + [(c, "宝石") for c in gems_c]):
+        b = bid(c)
+        block_markers.setdefault(b, set()).add(c)
+        block_roles.setdefault(b, []).append((role, c))
+    block_markers = {b: frozenset(cs) for b, cs in block_markers.items()}
+
+    meta = {
+        "sword": sword, "shield": shield, "keys": keys, "gems": gems,
+        "cells": {"sword": sword_c, "shield": shield_c, "keys": keys_c, "gems": gems_c},
+        "block_roles": block_roles,
+        "block_rep": {b: block_index["block_rep"][b] for b in pool},
+        "block_cells": {b: block_index["block_cells"][b] for b in pool},
+    }
+    return pool, meta, block_markers
 
 
 def build_harness(*, persistent=False):
@@ -297,6 +362,7 @@ def build_harness(*, persistent=False):
     from vzone import build_zone
     from key_targets import detect_key_targets
     from big_item_pull import detect_big_items
+    from block_targets import build_block_index
     from solver.beam import build_future_roster
     from solver.fitness import build_zone1_roster, calibrate_big
     from export_mt10_boss_route import make_initial_state
@@ -332,18 +398,24 @@ def build_harness(*, persistent=False):
     roster_big = build_future_roster(start)
     big_cells, _tau, ranked = detect_big_items(zone, roster_big, start)
     cands, info_key = detect_key_targets(start, zone_fids)
-    pool, meta = build_min_pool(big_cells, ranked, cands)
+    # 块涌现层：覆盖 zone 层 ∪ 所有 detect cell 所在层 → 静态算初始块集（detect 不变·块层叠其上·beam 零影响）
+    index_fids = (set(zone_fids) | {c[0] for c in big_cells}
+                  | {c[0] for c in cands} | {t[1][0] for t in ranked})
+    block_index = build_block_index(sorted(index_fids))
+    pool, meta, block_markers = build_min_pool(big_cells, ranked, cands, block_index)
 
     decode_cache_in = None
     if persistent:
         from nav_cache import PersistentNavCache
         decode_cache_in = PersistentNavCache()
     eval_fn, decode_cache = make_decode_fitness_eval(
-        start, zone, step, roster_fit, big, zone_fids, decode_cache=decode_cache_in)
+        start, zone, step, roster_fit, big, zone_fids, decode_cache=decode_cache_in,
+        block_markers=block_markers)
 
     return dict(start=start, zone=zone, step=step, pool=pool, meta=meta, ranked=ranked,
                 big_cells=big_cells, cands=cands, info_key=info_key,
                 roster_fit=roster_fit, big=big, zone_fids=zone_fids,
+                block_index=block_index, block_markers=block_markers,
                 eval_fn=eval_fn, decode_cache=decode_cache, s689=s689, s718=s718)
 
 
@@ -361,14 +433,16 @@ def main():
     print(f"  电池组就绪 {time.time() - t0:.1f}s")
 
     pool, meta = H["pool"], H["meta"]
+    cells = meta["cells"]
     print("\n" + "=" * 74)
-    print("① 最终最小目标池（10 目标·每个回溯 detect_big_items / detect_key_targets 涌现 cell）")
+    print("① 最终最小目标池（10 物品 cell → 折成初始块 id·detect 涌现 cell 不变）")
     print("=" * 74)
-    print(f"  剑(da>0·大件)              = {meta['sword']}")
-    print(f"  盾(dd>0·大件·689 轴心·深26s) = {meta['shield']}")
-    print(f"  MT4 候选钥 ×5(排除深 {EXCLUDE_DEEP_KEY}) = {meta['keys']}")
-    print(f"  小宝石 ×3(顺路·决策价值)    = {meta['gems']}")
-    print(f"  pool({len(pool)}) = {pool}")
+    print(f"  剑(da>0·大件)   cell={cells['sword']} → 块 {meta['sword']}")
+    print(f"  盾(dd>0·深26s)  cell={cells['shield']} → 块 {meta['shield']}")
+    print(f"  MT4 钥 ×5(排除深 {EXCLUDE_DEEP_KEY}) cells={cells['keys']}")
+    print(f"      → 块(去重 {len(meta['keys'])}) {meta['keys']}")
+    print(f"  小宝石 ×3       cells={cells['gems']} → 块 {meta['gems']}")
+    print(f"  cell 池(10) 折成 pool({len(pool)} 块) = {pool}")
 
     f689 = fitness(H["s689"], H["roster_fit"], H["big"], H["zone_fids"], w_potion=1.5, w_key=39.0)
     f718 = fitness(H["s718"], H["roster_fit"], H["big"], H["zone_fids"], w_potion=1.5, w_key=39.0)

@@ -131,30 +131,42 @@ def _free_cells(state, zone_blocked=None):
     return seen
 
 
-def count_floor_blocks(state, zone_blocked=None):
-    """整层自由格的 4-邻接连通块数（覆盖式 floodfill，非仅英雄块）。返回 (块数, 自由格数)。
-    报告缩点规模用：朴素「可达格」→ 缩点「块数」的塌缩比例。与 _is_free_tile 同口径。"""
+def partition_floor_blocks(state, zone_blocked=None):
+    """整层自由格的 4-邻接连通块【列表】（覆盖式 floodfill，非仅英雄块）。返回 [frozenset(cells), ...]。
+    与 _is_free_tile / count_floor_blocks 同口径（后者 = len(本函数) + 自由格合计）。
+    块为目标涌现层用：每个零损血连通块 = 一个 GA 目标单元；块身份由初始态 entities/门/事件【纯函数】定
+    （与勇者属性无关、单向吸纳只合并不分裂——见 analysis/ga_block_initial_model_diag 实测 A/B 坐实）。
+    塔无关：自由格判定全走 _is_free_tile（读引擎通用字段），无任何楼层/怪/道具硬编码。"""
     floor = state.floor
     rows, cols = len(floor.terrain), len(floor.terrain[0])
     if zone_blocked is None:
         zone_blocked = _zone_blocked(state)
     free_all = {(x, y) for y in range(rows) for x in range(cols)
                 if _is_free_tile(state, x, y, zone_blocked)}
-    seen, nblk = set(), 0
+    seen, blocks = set(), []
     for c in free_all:
         if c in seen:
             continue
-        nblk += 1
-        dq = deque([c])
+        comp, dq = set(), deque([c])
         seen.add(c)
         while dq:
             cx, cy = dq.popleft()
+            comp.add((cx, cy))
             for dx, dy in _DELTAS:
                 nb = (cx + dx, cy + dy)
                 if nb in free_all and nb not in seen:
                     seen.add(nb)
                     dq.append(nb)
-    return nblk, len(free_all)
+        blocks.append(frozenset(comp))
+    return blocks
+
+
+def count_floor_blocks(state, zone_blocked=None):
+    """整层自由格的 4-邻接连通块数（覆盖式 floodfill，非仅英雄块）。返回 (块数, 自由格数)。
+    报告缩点规模用：朴素「可达格」→ 缩点「块数」的塌缩比例。块列表本体见 partition_floor_blocks
+    （本函数 = 它的计数视图；块为目标涌现层直接用 partition_floor_blocks 取块集）。"""
+    blocks = partition_floor_blocks(state, zone_blocked)
+    return len(blocks), sum(len(b) for b in blocks)
 
 
 def _bfs_moves(state, free, target):

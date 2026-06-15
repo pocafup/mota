@@ -1,10 +1,11 @@
-"""【解码后规整·必做层护栏单测】§S12 自欺序列真解的两条命门 + 复刻一致性。
+"""【解码后规整·必做层护栏单测·块版】§S12 自欺序列真解的两条命门 + 复刻一致性（§S18 目标＝初始块 id）。
 
-钉死「只折叠真自欺、不误伤有效排序」：
-  · 含盾 [盾,剑,5钥,3宝] ≡ [剑,盾,5钥,3宝] → 规整出【相同】normalized（去盾顺路吸剑致剑排序失效＝§S11
+钉死「只折叠真自欺、不误伤有效排序」（基因元素＝块 id；进包判据＝块折进的全部 pool 物品 cell·block_markers）：
+  · 含盾 [盾块,剑块,5钥块,3宝块] ≡ [剑块,盾块,…] → 规整出【相同】normalized（去盾顺路吸剑致剑排序失效＝§S11
     自欺、该折叠），且终态全同 → fitness 相等（佐证规整不改值）；
-  · ★无盾 [剑,5钥] ≠ [5钥,剑] → 规整出【不同】normalized（剑早拿在无盾解有真实价值 Δ+16826、有效序
-    不该被误折叠）——这条是生死线：误折叠＝毁掉 +16826 信号＝规整做错。
+  · ★无盾 [剑块,5钥块] ≠ [5钥块,剑块] → 规整出【不同】normalized（剑早拿在无盾解有真实价值 Δ+16826、有效序
+    不该被误折叠）——这条是生死线：误折叠＝毁掉 +16826 信号＝规整做错。剑块(MT5)/钥块(MT4)异层必不同块、
+    天然不折叠；Δ 精确 +16826 兼当【块边界漂移】哨兵（剑/钥块若误并入宝石块 → Δ 变 → 本测红）。
   · 一致性：_decode_with_order 终态【逐字段】等于封板 decode（规整没改 decode 行为＝fitness 不变前提）。
 
 真 navigate_to（含盾深盾冷算·分钟级）→ 标 slow；module fixture 共享一次 build_harness + 四基因解码。
@@ -36,18 +37,19 @@ def cooked():
     h = build_harness()
     start, zone, step = h["start"], h["zone"], h["step"]
     cache = h["decode_cache"]
+    bm = h["block_markers"]                       # 块模式进包判据（块为目标·必传 _decode_with_order）
     m = h["meta"]
-    sword, shield, keys, gems = m["sword"], m["shield"], m["keys"], m["gems"]
+    sword, shield, keys, gems = m["sword"], m["shield"], m["keys"], m["gems"]   # 现为块 id（非 cell）
     genes = {
-        "X1": [sword] + keys,                    # 无盾·剑早（剑在 5 钥之前）
-        "Y1": keys + [sword],                    # 无盾·剑晚（5 钥之后才拿剑）
-        "X2": [sword, shield] + keys + gems,     # 含盾·剑在盾前
-        "Y2": [shield, sword] + keys + gems,     # 含盾·盾在剑前（盾腿顺路吸剑＝§S11 自欺）
+        "X1": [sword] + keys,                    # 无盾·剑早（剑块在 5 钥块之前）
+        "Y1": keys + [sword],                    # 无盾·剑晚（5 钥块之后才拿剑块）
+        "X2": [sword, shield] + keys + gems,     # 含盾·剑块在盾块前
+        "Y2": [shield, sword] + keys + gems,     # 含盾·盾块在剑块前（盾腿顺路吸剑＝§S11 自欺）
     }
     out = {}
     for name, g in genes.items():
         _t1, final_dec = decode(g, start, zone, step, cache=cache)
-        _t2, final_ord, norm = _decode_with_order(g, start, zone, step, cache)
+        _t2, final_ord, norm = _decode_with_order(g, start, zone, step, cache, block_markers=bm)
         f = fitness(final_dec, h["roster_fit"], h["big"], h["zone_fids"],
                     w_potion=1.5, w_key=39.0)
         out[name] = dict(gene=g, final_dec=final_dec, final_ord=final_ord, norm=norm, fit=f)
@@ -94,5 +96,8 @@ def test_shieldless_effective_order_not_folded(cooked):
     x1, y1 = cooked["X1"], cooked["Y1"]
     assert x1["norm"] != y1["norm"], \
         f"★无盾有效序被误折叠（+16826 信号被毁）：X1={x1['norm']}  Y1={y1['norm']}"
-    assert x1["fit"] > y1["fit"], \
-        f"剑早(X1)应严格优于剑晚(Y1)，实得 X1={x1['fit']} Y1={y1['fit']} Δ={x1['fit'] - y1['fit']:+.1f}"
+    delta = x1["fit"] - y1["fit"]
+    assert delta > 0, \
+        f"剑早(X1)应严格优于剑晚(Y1)，实得 X1={x1['fit']} Y1={y1['fit']} Δ={delta:+.1f}"
+    assert abs(delta - 16826.0) < 1e-6, \
+        f"★生死线 Δ 漂移（块边界哨兵）：剑早−剑晚应＝+16826.0（§S12 铁证·块版同值），实得 {delta:+.1f}"

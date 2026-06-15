@@ -97,7 +97,8 @@ def main():
     start, zone, step_fn = H["start"], H["zone"], H["step"]
     roster, big, zone_fids = H["roster_fit"], H["big"], H["zone_fids"]
     meta, dc, eval_fn = H["meta"], H["decode_cache"], H["eval_fn"]
-    sword, shield = meta["sword"], meta["shield"]
+    bm = H["block_markers"]                       # 块为目标：进包判据（_decode_with_order 块模式必传）
+    sword, shield = meta["sword"], meta["shield"]   # 现为块 id（meta 角色→块 id），tag_of/sword 比较照旧
 
     print(f"\n  目标池 pool({len(H['pool'])}) = {H['pool']}")
     print(f"  剑={sword}  盾={shield}")
@@ -118,7 +119,7 @@ def main():
     def logcb(gl):
         gene = gl.best_individual
         has_shield = shield in gene
-        _t, _f, norm = _decode_with_order(gene, start, zone, step_fn, dc)
+        _t, _f, norm = _decode_with_order(gene, start, zone, step_fn, dc, block_markers=bm)
         sword_pos = (norm.index(sword) + 1) if sword in norm else None
         sp = f"剑第{sword_pos}进包" if sword_pos else "剑未进包"
         sh = "含盾✅" if has_shield else "无盾  "
@@ -138,7 +139,7 @@ def main():
 
     # ── GA 最优解 → 解码终态 + normalized 真实进包序 ───────────────────────────
     best = res.best_individual
-    _tok, ga_final, ga_norm = _decode_with_order(best, start, zone, step_fn, dc)
+    _tok, ga_final, ga_norm = _decode_with_order(best, start, zone, step_fn, dc, block_markers=bm)
     print("\n" + "=" * 78)
     print("③ GA 最优解：基因(执行序) vs normalized(真实进包序)")
     print("=" * 78)

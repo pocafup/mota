@@ -32,6 +32,18 @@ from ga_navigate import navigate_to
 _DEFAULT_CACHE = object()   # sentinel：decode 不传 cache → 透传给 navigate_to 用其模块级默认共享缓存
 
 
+def goal_to_cell(goal):
+    """【块为目标·decode 改的唯一一处】把基因元素归一成 navigate_to 吃的 cell=(fid,x,y)：
+      · 块 id (fid,(mx,my))（2 元·第二元是 (mx,my) 元组）→ 代表 cell (fid,mx,my)（=块内 min·初始态几何
+        锚）。进块即 _absorb 吸光整块（ga_navigate.py:209），代表 cell 是道具格或空地都成立。
+      · cell (fid,x,y)（3 元）→ 原样返回（兼容封板单物品目标，test_ga_decode 仍走此路）。
+    判别按长度：块 id 2 元、cell 3 元——两者不混淆（封板件 navigate_to 一字不动）。"""
+    if len(goal) == 2:
+        fid, (mx, my) = goal
+        return (fid, mx, my)
+    return goal
+
+
 def decode(chromosome, start_state, zone, step_fn, *, cache=_DEFAULT_CACHE, max_pops=8000):
     """见模块头契约。返回 (action_tokens: list, final_state)。
     cache：navigate_to 缓存外壳的 cache 形参（GA 内循环反复导航同几个目标 → 命中省算）。
@@ -46,8 +58,9 @@ def decode(chromosome, start_state, zone, step_fn, *, cache=_DEFAULT_CACHE, max_
         # 商人 trade 目标【留空接口】（钉死点 1）：将来 goal 形如带 type==trade + buy 位的对象时，此处
         # 先 navigate_to 到商人格、再按 buy 发 step(CHOICE:0=买 / CHOICE:1=不买，_resolve_choices 同口径)。
         # 本棒 goal 全是 pickup 的 (fid,x,y) cell → 直接定向导航、无决策位。
+        # 块为目标：goal 可能是块 id (fid,(mx,my)) → goal_to_cell 归一成代表 cell 再导航（封板件不动）。
         final, moves, reached = navigate_to(
-            state, goal, zone, step_fn, max_pops=max_pops, **kw)
+            state, goal_to_cell(goal), zone, step_fn, max_pops=max_pops, **kw)
         if reached:
             state = final
             tokens.extend(moves)
