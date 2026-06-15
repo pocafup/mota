@@ -207,7 +207,7 @@
 
 ---
 
-### §S16 GA目标层级重构：块为目标(取代单物品+禁区/规整)（2026-06-14）
+### §S16 GA目标层级重构：块为目标(取代单物品+规整)（2026-06-14）
 
 > 本 session 只落盘根本性方向决定、未实现、未改产品码、未动禁区/规整(玩家红线)。下个 session 先坐实能否落地、要动多深，再定走不走这条根本重构。归档两份只读诊断证据：`analysis/ga_forbidden_failrate_diag.py`(禁区 fail 率·0红/长基因100%黄)、`analysis/ga_block_granularity_diag.py`(连通块粒度·实证 MT4 五钥 atk10 静态分4块/atk26 清怪后并1块)。
 
@@ -231,7 +231,7 @@
 
 **【玩家判据(落盘备用)】** 拿钥匙的时机有意义⟺路上有怪/地形/门拦路(=不能免费到达、不在同一零损血连通块)；同一零损血连通块内先后顺序完全不影响。←这正是"块为目标"的理论基础：块内无序、块间(隔门/怪)才有时机价值。
 
-**【路线】** 下个session先坐实(缩点现状+边权动态性+爆炸半径+五钥楼层)，玩家看清能不能落地、要动多深，再定走不走"块为目标"这条根本重构。禁区本体先不实现(若走块为目标则禁区被取代)。
+**【路线】** 下个session先坐实(缩点现状+边权动态性+爆炸半径+五钥楼层)，玩家看清能不能落地、要动多深，再定走不走"块为目标"这条根本重构。禁区本体先不实现(是块为目标之后的独立下一棒、不被块为目标取代——§S17 已坐实纠正)。
 
 ---
 
@@ -258,6 +258,79 @@
 **【禁区独立待办(块为目标之后)】** §S15 禁区方案(navigate_to 带禁区寻路、B' 不碰 quotient、判无效给可区分差分 INVALID_BASE+进度、护栏:去 MT4 五钥不碰剑格已确认安全)仍有效、是块为目标之后的独立下一棒。治跨块顺路吸。
 
 **【五钥楼层】** §S9 没标错=游戏第 04 层(title 铁证)、候选池正确。玩家记忆可能与 MT3 第 03 层那片顺路钥(①MT3:6)记混、建议游戏里对一下两层左上钥群。
+
+---
+
+### §S18 块为目标实现方案【已确认方向·三岔路已拍·待实现·玩家终审】（2026-06-14）
+
+> 接 §S17：本 session 只出实现方案 + 玩家拍三岔路、**未实现、未改产品码**。顺手清了 §S16 标题与【路线】行两处"禁区被取代"残留（与 §S17 一致：块为目标取代单物品+规整、**不**取代禁区）。下个 session 先坐实岔路 A 的 (a)、再实现（玩家终审每步）。**本方向优先于下方 🎯②上规模跑——块为目标是②的前置结构清理（§S16 根因：目标层级错了）。**
+
+**【方案六条·对应 §S17 待办】**
+1. ·块涌现层：`solver/quotient.py` 新增 `partition_floor_blocks(state)->list[frozenset]`（与 `_is_free_tile`/`_DELTAS` 同口径），`count_floor_blocks`（现只返计数·不返块集）改调它＝复用口径不另造。全局稳定块 id=`(fid, min(cell))`（cell 不含 fid·跨层 min 会撞·必带 fid）。extract/ 新增 `block_targets.py`（驱动层）建 `{(fid,x,y):块id}` 映射 + dump（一区 144 块 + 10 目标 cell 各属哪块·预期 pool 缩到 <10 块 id＝块内假序消失的直证）。诊断脚本 `_partition`/`_stable_blocks` 逻辑已验证、可提升为产品函数。
+2. ·基因表示：`build_min_pool` 内把 detect 吐的 cell 经映射折成块 id 去重、`meta` 标块 id 来源；`pool`=块 id 列表；`run_ga` 的 _mutate/_crossover/_random_individual **逻辑零改**（元素 cell→块 id）。**decode 改一处**：块 id→代表 cell(=min(cell))→`navigate_to`（封板件**不动**·进块即 `_absorb` 吸光整块·ga_navigate.py:209；到达判定对道具格/空地都成立）。
+3. ·★护栏（关键·守 beam 零影响）：`detect_big_items`/`detect_key_targets` 签名返回值不变（**仍吐 cell**）；块涌现叠在 detect 输出**之上**（build_min_pool 内）、detect 函数体一字不改 → beam 的 `pull_big`/`pickup_bonus`（消费 detect 的 cell·走自己的 search_quotient·不经块层）零影响。硬验收 = beam 4 守卫字节零回归全绿。
+4. ·空块跳过：基因块运行时已被勇者块吸纳 → `navigate_to` 立即 reached=True/无新货 → 优雅跳过（像跳 _taken）。块内维度=真实涌现；**跨块顺路吸残留=禁区治、本棒不声称解决（§S17）**。
+5. ·分裂特判：见岔路 C。
+6. ·规整退役：见岔路 B。★§S12 +16826 铁证块为目标后**更稳固**——剑 MT5/钥 MT4 不同层必不同块→[剑块,5钥块]≠[5钥块,剑块]**天然不折叠**（从"规整不能误折叠"升级为"结构上不可能折叠"）。
+
+**【三岔路确认（玩家拍·2026-06-14）】**
+- ·A 初始态来源 = **先坐实 (a) 可行性再定**：(a)=从 data/floors/*.json 构造 `_is_free_tile` 可用的干净 floor、摆脱 route 依赖（但 `_zone_floor_cells` 的 is_wall 口径≠`_is_free_tile`·需新写"静态 JSON→自由块视图"·可行性未坐实）；(b)=沿用诊断脚本重放 route 首踏快照（已验证 144/4 块·但挂一条 route 文件依赖）。**下个 session 第一步=读 simulator 层加载能力、坐实 (a) 能否干净实现，再在 (a)/(b) 间定。**
+- ·B 规整处置 = **保留+最小适配**：`_decode_with_order` 进包追踪 cell→块、normalized 改块 id 序、护栏单测改块版；规整无害（§S13 实证只省评估不改爬坡轨迹），等禁区棒根治跨块顺路吸后连同护栏一起删。
+- ·C 分裂特判 = **暂不特判+补一次性分裂验证**：MT33 在三区不管；MT10 不产采集目标块（全在 MT1-MT9）、navigate_to 实时算块对分裂免疫；只补一次性验证（扩展诊断 test_B 检测 MT1-MT9"1 旧块裂≥2 新块且勇者不在"反例·跑标尺 route 确认零反例→一区安全）。MT10/二三区分裂特判留过 boss/出一区再做。
+
+**【护栏单测改法（tests/test_ga_normalize_guard.py）】** 无盐不折叠（生死线）→块版 [剑块,5钥块]≠[5钥块,剑块]（天然成立·更强保证）；含盾折叠→命运绑禁区（禁区做完重写为"走不碰剑块的路/判无效"）；一致性→随 decode 块化更新。
+
+**【下个 session 起步（顺序铁律）】** ①坐实岔路 A 的 (a)（读 simulator 层加载）→定初始态来源 ②实现块涌现层 + dump 坐实 144/4 块 ③改 build_min_pool/pool/meta + decode 块化 ④补分裂验证 ⑤护栏单测块版 ⑥全程 beam 4 守卫字节零回归 + pytest 全绿。**玩家终审每步、每步先确认再下一步。**
+
+**【红线】** 不取代禁区（§S17）；跨块顺路吸/navigate 选路 bias 不解决（留禁区下一棒）；detect 不改保 beam 零影响；用 CC 不用 BCC；偏好涌现（不写死剑盾顺序）。
+
+---
+
+### §S19 岔路A坐实通过：(a)纯静态JSON构造可行【定用(a)·实跑铁证·待玩家拍后实现】（2026-06-14）
+
+> 接 §S18 起步铁律①。本 session 只坐实 (a) 可行性 + 定 (a)/(b) + 出 (a) 版块涌现层方案、**未实现产品块涌现层、未碰 navigate_to/detect/beam**。新建一次性只读实验 `analysis/ga_block_static_view_diag.py`（同口径对照、归档 analysis/）。**玩家看坐实结果拍板后再实现。**
+
+**【坐实方法】** 同一脚本对每个一区层【同时】算 (a) 纯静态构造 与 (b) 重放首踏快照的块划分，**逐格断言 free_all 与块集完全一致**（不只块数、是 cell-for-cell 同分区）。底层 `_partition`/`_is_free_tile`/`_zone_blocked`/`_DELTAS` 全是 quotient 产品函数本体（import 自 §S17 诊断、零口径偏差）。
+
+**【①_is_free_tile 字段依赖（坐实，带 file:line）】** 读 11 类字段：terrain 维度/tile 值、`change_floor`、`zone_blocked`(领域15/阻击18伤格)、`_no_pass_tiles`(tiles.json noPass)、`_in_alive_monster_footprint`(大怪占格)、`entities` 实体 tile、`_tile_to_item`(道具格)、`_live_arrive_event`→`events[loc].enable`+`_suppressed_events`、模块常量(WALL/DOOR/AUTO_OPEN)。`_is_free_tile`/`_zone_blocked` **均不读 hero**（块身份跨属性恒定·印证 §S17 断言1）。
+
+**【②静态 JSON 齐不齐（坐实）】** **齐**。11 类里 10 类直接来自静态 JSON（floors/*.json + tiles.json + monsters.json，`load_floor` 一次性建好）；唯一运行时字段 `floor._suppressed_events` 在初始态**恒为空集**（`simulator.py:350` 硬初始化 `set()`，只有 step 触发事件才填）。一区 **MT1–MT9 零 footprint 大怪、零领域/夹击/阻击怪** → `_zone_blocked`/`_in_alive_monster_footprint` 恒空/恒 False。一区 events 稀疏干净（MT5-9 无 events；MT1 king `enable:false`；MT2/3/4 list-event 全挂 NPC 实体格或空地、判非自由全靠静态 events+entities）。⇒ **构造静态 floor 视图 = 调 `load_floor` 但不进任何 step**，无需新写派生逻辑（`make_static_state(fid)`：`load_floor(MTx.json)` 套最小 GameState、`current_floor=fid`、hero 仅占位）。
+
+**【③(a) vs (b) 块集是否一致（实跑铁证）】** **重叠面逐格完全一致**：10 个 (b) 能捕获的层（MT1-MT10）free_all+块集 **cell-for-cell 全等**，共有层总块数 **144=144**；**MT4 五钥+宝石归属 (a)=(b)：都落 4 初始块、`bids=[0,4,6,10]` 完全相同**（坐实"MT4→4 块"）。**唯一差异=(a) 额外覆盖 MT0**（1 块·标尺 route 首踏从没进过 MT0→(b) 整层盲区）；145=144+MT0。**非不一致、是 (a) 无盲区的优势。**
+
+**【④定 (a)（理由）】** ✅ 用 **(a)**：① 与已验证 (b) 在重叠面严格等价（实跑铁证）；② 摆脱 route 文件依赖（无产品码挂 route 这一地基级债）；③ 初始态天然未操作、不靠 (b)"route 首踏前未改层"隐含假设；④ 无盲区（覆盖 MT0、不受 route 走没走过影响）；⑤ 实现极简（= `load_floor` 不进 step、`make_static_state` 已在诊断脚本验证）。
+
+**【坐实附带·待确认（仅泛化出一区才需复核，本棒一区干净不受影响）】** (a) 二区起若 list-event 挂空地且带方向/条件 `if`（如 MT41 假墙隐藏怪），`_live_arrive_event` 只看 `enable` 不解析 `if`→初始态一律判非自由（保守偏紧、不会误判为自由、安全）；(b) `_suppressed_events` 还承载 `autoEvent` once-key，一区 autoEvent 全空（已验证）、高层需另查。MT0 块结果无 (b) 真值可比（route 盲区）、但 1 块开阔层是最低风险情形。
+
+**【(a) 版块涌现层方案（§S18 步②起·不变·初始态来源已定=(a)）】** `partition_floor_blocks(state)` 包装已验证 `_partition`（CC floodfill），每层用 `make_static_state(fid)` 喂初始态（不再重放 route）；其余 §S18 六条（基因块 id 化、护栏 detect 仍吐 cell 保 beam 零影响、空块跳过、分裂验证、规整保留最小适配）全不变。**实现待玩家拍。**
+
+---
+
+### §S20 块为目标实现完成：4 dump 验收通过【已 commit 25221af·下一步=禁区】（2026-06-14）
+
+> 接 §S18/§S19 起步铁律：本 session **端到端实现 §S18 六条 + (a) 初始态来源（§S19 定）**，4 dump 验收过、玩家拍板、已 commit `25221af`（块为目标地基）。**块为目标只解决块内假序——序列有效性的另一半（跨块顺路吸/navigate 选路 bias）未做、下一步=禁区（§S15）。禁区做完才跑训练。**
+
+**【实现落地（commit 25221af·256+7 绿·beam 47 字节零回归）】**
+- 块涌现层：`solver/quotient.py` 新增 `partition_floor_blocks(state)->list[frozenset]`（CC floodfill·与 `_is_free_tile`/`_DELTAS` 同口径）、`count_floor_blocks` 改调它（复用口径·保 (nblk,nfree) 契约）。`extract/block_targets.py`（新·驱动层）：`make_static_state(fid)`（§S19 (a)·`load_floor` 不进 step）+ `build_block_index` 建 cell→块 id 映射。块 id=`(fid, min(cell))`（含 fid·跨层 min 会撞）。
+- 基因块 id 化：`build_min_pool` 把 detect 吐的 cell 折成块 id + `block_markers`（进包判据）；`run_ga` 变异/交叉逻辑零改（元素 cell→块 id）。decode 改一处：块 id→代表 cell→`navigate_to`（进块即 `_absorb` 吸光整块）。
+- ★护栏守 beam 零影响：`detect_big_items`/`detect_key_targets` 签名/返回值不变（**仍吐 cell**）、块层叠其上 → beam 4 守卫字节零回归全绿（47 绿）。
+- 空块跳过两型：①自欺（块已被顺路吸空→navigate 零新增）②不可达（navigate reached=False→原子跳过·state 不变·任何基因永远可解码）。
+- 规整保留最小适配（§S18 岔路 B）：`_decode_with_order` 进包追踪改块 id 序、护栏单测块版；**禁区棒根治跨块顺路吸后连同护栏一起删·本棒不删**。
+- 单测：`tests/test_quotient_blocks.py`（块划分契约 3）+ `tests/test_block_targets.py`（块 id/代表 cell/cell→块自洽/与 partition 一致/确定性 5）+ `tests/test_ga_normalize_guard.py` 升级块版（含 +16826 哨兵）。
+
+**【4 dump 验收结果（玩家拍板通过·2026-06-14）】**
+- ① pool 折叠：detect 10 物品 cell → pool **7 块**；五钥 5 cell → **3 钥块**归并（MT4 两对相邻钥各同块·块内假序消失·直证）。
+- ② +16826 块版生死线：无盾 [剑块,5钥块] vs [5钥块,剑块]——剑块 MT5 ≠ 钥块 MT4 **异层必不同块 → 天然不可折叠**（从"规整不能误折叠"升级为"结构上不可能折叠"）；Δfitness(剑早−剑晚)=**+16826.0** 守住、pin 成单测哨兵。
+- ③ 一区分裂验证：MT1–MT9 重放标尺 route 查 1475 同层步、"1 旧块裂≥2 新块"反例。**四个目标层 MT1/MT4/MT5/MT9 零分裂**；唯一反例 = MT2 step#71（见下例外）。
+- ④ 块为目标 GA 解 decode：块 id→代表 cell→吸光块·空块跳过两型都对、玩家眼看走得对。
+
+**【★已知例外·MT2 小偷 NPC 分裂（doc-only·不加特判码）】**
+- 现象：dump③ 报 MT2 step#71 一起块分裂（旧块锚 (1,2) → 裂成 [(1,2),(1,10)]）。
+- 成因（实跑钉死·非猜测）：MT2 开局小偷 NPC 越狱剧情走位——`analysis/ga_block_mt2_split_diag.py` 重放定位实体 123（MT2.json events (3,7)=小偷 thief）`move left:2 down:2` 走到 (1,9) 暂时截断走廊、其后 `move`+`hide` 离开。是**脚本剧情 NPC 走位**、非机关/领域结构事件。
+- 为何无害：**MT2 无目标块**（采集目标全在 MT1/MT4/MT5/MT9）；块是初始态静态标签（只算一次·从不中途重划分）；navigate_to 实时算连通对瞬时阻断免疫。单向吸纳"只合并不分裂"对**所有目标块**成立。
+- 为何不加特判码：它不碰任何目标块、加特判是空操作。**留认知给将来**：万一目标块挪到 MT2、或别层有类似剧情 NPC 走位致目标块分裂，须复核此例外。
+
+**【★下一步=禁区（§S15·不是跑训练）】** 块为目标只治**块内假序**（五钥互碰·规整退役地基铺好）；**序列有效性的另一半——跨块顺路吸 / navigate 选路 bias（剑被顺路吸根本·§S17）依然存在**。下一棒 = §S15 禁区（navigate_to 带禁区寻路·判无效给可区分差分·B' 不碰 quotient）治跨块顺路吸。**禁区做完才上规模跑训练**（规整连同护栏在禁区棒一起删）。
 
 ---
 
