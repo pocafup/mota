@@ -43,29 +43,36 @@ def _dedup(seq):
 
 # ─── 进化算子（全在目标层，保证后代仍是 pool 的无重复有序子集 → 必可解码）────────────────────
 
-def _random_individual(pool, rng, max_len=None):
-    """随机基因 = pool 的【随机长度随机顺序无重复子集】（长度 1..len(pool)）。
+def _random_individual(pool, rng, max_len=None, min_len=None):
+    """随机基因 = pool 的【随机长度随机顺序无重复子集】（长度 lo..hi）。
     全长度谱采样 → 初代里既有短基因（缺剑/盾→低分）又有长基因但乱序（先打钥匙怪费血→次优）→ 给爬坡留头寸。
     max_len（§S23 机器B 短基因）：给则长度上限封到 min(len(pool), max_len)（采样谱压短）；None（默认）=
-      全长度谱（字节级零回归——hi==len(pool)、rng 调用与原版逐字节同）。"""
+      全长度谱（字节级零回归——hi==len(pool)、rng 调用与原版逐字节同）。
+    min_len（§S24 机器A 长基因区间下限）：给则长度下限抬到 min(min_len, hi)（短于此的乱序基因无搜索价值·省算）；
+      None（默认）= lo==1（字节级零回归——randint(1,hi) 与原版逐字节同·不改 rng 消耗）。"""
     hi = len(pool) if max_len is None else min(len(pool), max_len)
-    k = rng.randint(1, hi)
+    lo = 1 if min_len is None else min(min_len, hi)
+    k = rng.randint(lo, hi)
     return rng.sample(pool, k)
 
 
-def _mutate(ind, pool, rng, max_len=None):
+def _mutate(ind, pool, rng, max_len=None, min_len=None):
     """目标层单点变异（三选一·最笨版本、不组合）。返回新基因（不改入参）：
       swap   : 交换两目标顺序（调「先去哪后去哪」——689 式先盾后钥匙就是顺序）；
       insert : 插入一个当前不在基因里的 pool 目标（调「多去拿一个」）；
       delete : 删除一个目标（调「少去拿一个」）。
     可行算子按当前基因长度/是否还有可插目标动态决定 → 永远返回合法子集（不会插重、不会空到无法操作）。
     max_len（§S23 机器B 短基因）：给且 len(ind)≥max_len → 禁 insert（只 swap/delete·守长度上限）；
-      None（默认）= 不限长（字节级零回归——insert 条件与原版同）。"""
+      None（默认）= 不限长（字节级零回归——insert 条件与原版同）。
+    min_len（§S24 机器A 长基因区间下限）：给且 len(ind)≤min_len → 禁 delete（只 swap/insert·守长度下限）；
+      None（默认）= 不限（字节级零回归——delete 与 swap 同列加入·ops 序与原版逐字节同）。"""
     ind = list(ind)
     missing = [g for g in pool if g not in ind]
     ops = []
     if len(ind) >= 2:
-        ops += ["swap", "delete"]
+        ops.append("swap")
+        if min_len is None or len(ind) > min_len:
+            ops.append("delete")
     if missing and (max_len is None or len(ind) < max_len):
         ops.append("insert")
     if not ops:                                     # 极端：基因==整个pool且len<2（pool只1个）→ 无可变，原样
@@ -88,7 +95,7 @@ def _tournament(pop_scored, k, rng):
     return list(max(cands, key=lambda fs: fs[0])[1])
 
 
-def _crossover(p1, p2, pool, rng, max_len=None):
+def _crossover(p1, p2, pool, rng, max_len=None, min_len=None):
     """OX 顺序交叉的【变长无重复子集】适配变体（标准 OX/PMX 是给等长同元素全排列设计的，
     这里两父代是 pool 的不同子集、元素集可能不同 → 套 PMX 位置映射会语义崩坏：引入重复或退化）。
       ① 从 p1 取一段连续子序列 seg（继承 p1 相对顺序、len≥1）；
@@ -97,6 +104,9 @@ def _crossover(p1, p2, pool, rng, max_len=None):
     后代元素 ⊆ pool、无重复、长度自然变化、seg 保 p1 序 / rest 保 p2 序 → 必合法子集、必可解码。
     max_len（§S23 机器B 短基因）：给且后代超长 → 截到前 max_len（仍无重·仍 ⊆pool·仍合法）；
       None（默认）= 不截（字节级零回归——返回值与 rng 消耗均与原版逐字节同·截断不耗 rng）。
+    min_len（§S24 机器A 长基因区间下限）：后代 ⊇ p2（保 p2 全员）→ 父代≥下限则后代自然≥下限；仅父代本身短
+      （如注入短种子杂交）才会短于下限 → 从 pool 未选块随机补到 min_len（仍无重·仍 ⊆pool·仍合法）；
+      None（默认）= 不补（字节级零回归——不消耗 rng）。
     不改入参（p1 拷贝、p2 只读、返回全新 list）。"""
     p1 = list(p1)
     i = rng.randrange(len(p1))
@@ -108,6 +118,11 @@ def _crossover(p1, p2, pool, rng, max_len=None):
     child = rest[:k] + seg + rest[k:]
     if max_len is not None and len(child) > max_len:
         child = child[:max_len]
+    if min_len is not None and len(child) < min_len:        # §S24：后代短于下限（仅父代短时·如短种子杂交）→ 补 pool 未选块
+        addable = [g for g in pool if g not in child]
+        need = min(min_len - len(child), len(addable))
+        for g in rng.sample(addable, need):
+            child.insert(rng.randint(0, len(child)), g)
     return child
 
 
@@ -137,7 +152,7 @@ class GenLog:
 
 def run_ga(pool, eval_fn, *, population=12, generations=6, tournament_k=3,
            elite=2, crossover_rate=0.0, inject=None, seed=20260613, log=None,
-           max_len=None, mutations_per_child=1, random_immigrants=0):
+           max_len=None, mutations_per_child=1, random_immigrants=0, min_len=None):
     """最小 GA 主循环（见模块头）。pool=目标 cell 列表；eval_fn(gene)->fitness。返回 GAResult。
     fitness 缓存按基因元组去重（同基因不重复评估·decode 贵）。固定 seed 可复现。
     crossover_rate: 0=纯变异(默认·字节级零回归——>0 判定短路、不消耗 rng)；>0 则每个后代以此概率两父 OX 交叉。
@@ -147,6 +162,9 @@ def run_ga(pool, eval_fn, *, population=12, generations=6, tournament_k=3,
     ── §S23 早熟三旋钮（均默认=原版行为·字节级零回归·改的是进化机器超参不碰封板件）──
     max_len:             基因长度上限（机器B 短基因）。None=不限（全长度谱）。穿透到 _random_individual /
                          _mutate（禁越界 insert）/ _crossover（截长）/ 随机移民。
+    min_len:             基因长度下限（机器A 长基因区间·§S24）。None=不限（下限 1·零回归）。穿透到 _random_individual
+                         （抬采样下限）/ _mutate（禁越界 delete）/ _crossover（短则补）/ 随机移民。注：inject 注入种子
+                         是【显式给定点】不受 min_len 约束——只有 GA 自生成的基因（随机/变异/交叉/移民）才守区间。
     mutations_per_child: 每个后代连做几次单点变异（>1=更大变异步长·维持多样性抗早熟）。1=原版（恰一次·零回归）。
     random_immigrants:   每代精英之后注入几条全新随机基因（抗种群塌缩·昨晚 gen2 收敛的直接解药）。0=不注入
                          （零回归——range(0) 不消耗 rng）。注入数被 population 截顶（精英+移民≤population）。"""
@@ -168,7 +186,7 @@ def run_ga(pool, eval_fn, *, population=12, generations=6, tournament_k=3,
             f"注入个体须是 pool 的非空无重复子集，违例: {ind}"
         seeded.append(list(ind))
     assert len(seeded) <= population, f"注入个体数 {len(seeded)} > 种群 {population}"
-    pop = seeded + [_random_individual(pool, rng, max_len) for _ in range(population - len(seeded))]
+    pop = seeded + [_random_individual(pool, rng, max_len, min_len) for _ in range(population - len(seeded))]
     gen_best = []
     history = []
     best = (float("-inf"), None)
@@ -191,15 +209,15 @@ def run_ga(pool, eval_fn, *, population=12, generations=6, tournament_k=3,
         for _ in range(random_immigrants):               # §S23 抗早熟：每代注入全新随机基因（0=不消耗 rng·零回归）
             if len(nxt) >= population:
                 break
-            nxt.append(_random_individual(pool, rng, max_len))
+            nxt.append(_random_individual(pool, rng, max_len, min_len))
         while len(nxt) < population:
             if crossover_rate > 0 and rng.random() < crossover_rate:
                 child = _crossover(_tournament(scored, tournament_k, rng),
-                                   _tournament(scored, tournament_k, rng), pool, rng, max_len)
+                                   _tournament(scored, tournament_k, rng), pool, rng, max_len, min_len)
             else:
                 child = _tournament(scored, tournament_k, rng)
             for _ in range(mutations_per_child):         # §S23 抗早熟：>1=更大变异步长（1=恰一次·零回归）
-                child = _mutate(child, pool, rng, max_len)
+                child = _mutate(child, pool, rng, max_len, min_len)
             nxt.append(child)
         pop = nxt
 

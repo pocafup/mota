@@ -52,6 +52,7 @@ def _parse_args():
     p.add_argument("--mut", type=int, default=1, help="mutations_per_child（每后代复合变异次数·>1 维持多样性）")
     p.add_argument("--immig", type=int, default=0, help="random_immigrants（每代注入新随机基因数·抗塌缩）")
     p.add_argument("--maxlen", type=int, default=None, help="基因长度上限（机器B 短基因·缺省=不限）")
+    p.add_argument("--minlen", type=int, default=None, help="基因长度下限（机器A 长基因区间·缺省=不限）")
     p.add_argument("--elite", type=int, default=2, help="精英保留数")
     p.add_argument("--k", type=int, default=3, help="锦标赛 k")
     p.add_argument("--seed", type=int, default=20260613, help="随机种子（两机用不同 seed 探不同区域）")
@@ -141,12 +142,13 @@ def main():
     seeds = [[shield_block], [sword_block]]        # 短有效种子（长度 1 必有效·保 gen0 有起点）
 
     maxlen_str = "不限" if args.maxlen is None else str(args.maxlen)
+    minlen_str = "不限" if args.minlen is None else str(args.minlen)
     log_line("")
     log_line("=" * 70)
     log_line(f"机器 tag={args.tag or '(无)'}  pool=34 块  pop={population}  gen={generations}  "
              f"交叉={args.cross}  精英{args.elite}  k{args.k}  seed={args.seed}")
-    log_line(f"  早熟旋钮: maxlen={maxlen_str}  mut/child={args.mut}  随机移民={args.immig}/代  "
-             f"(默认 1/0/不限=原版·>则抗早熟)")
+    log_line(f"  早熟旋钮: 长度区间=[{minlen_str}..{maxlen_str}]  mut/child={args.mut}  随机移民={args.immig}/代  "
+             f"(默认 1/0/不限=原版·>则抗早熟·注入种子不受下限约束)")
     log_line(f"  剑块={sword_block}[{role_of(sword_block)}]  盾块={shield_block}[{role_of(shield_block)}]")
     log_line(f"  注种子: {[ [role_of(b) for b in s] for s in seeds ]}")
     log_line(f"  三方对照基线: fitness(689)={f689:.1f}  fitness(718)={f718:.1f}  (白天7块GA到 -1002)")
@@ -221,7 +223,7 @@ def main():
         res = run_ga(pool, eval_logged, population=population, generations=generations,
                      tournament_k=args.k, elite=args.elite, crossover_rate=args.cross,
                      inject=seeds, seed=args.seed, log=on_gen,
-                     max_len=args.maxlen, mutations_per_child=args.mut,
+                     max_len=args.maxlen, min_len=args.minlen, mutations_per_child=args.mut,
                      random_immigrants=args.immig)
         log_line("")
         log_line(f"=== run_ga 跑完 gen{generations}（已收敛或代数用尽）===")
