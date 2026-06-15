@@ -122,6 +122,7 @@ class GenLog:
     n_unique_evals: int             # 累计真 decode+评分去重数（缓存命中观察）
     spread_lo: float                # 该代种群最差 fitness（多样性下沿）
     spread_hi: float                # 该代种群最优 fitness（=best_fitness）
+    n_invalid: int = 0              # 该代序列无效个体数（§S15 INVALID_BASE 带）·爬坡健康度：初代高→末代降=进度分把 GA 往有效序拽（'先短后拼长'）
 
 
 def run_ga(pool, eval_fn, *, population=12, generations=6, tournament_k=3,
@@ -163,8 +164,9 @@ def run_ga(pool, eval_fn, *, population=12, generations=6, tournament_k=3,
         if gbest_fit > best[0]:
             best = (gbest_fit, list(gbest_ind))
         if log:
+            n_inv = sum(1 for f, _ in scored if f < INVALID_BASE + 1e6)   # §S15 无效带个体（爬坡健康度·诊断用·只在 log 路径算）
             log(GenLog(g, list(gbest_ind), gbest_fit, len(fit_cache),
-                       scored[-1][0], scored[0][0]))
+                       scored[-1][0], scored[0][0], n_inv))
         if g == generations - 1:
             break
         # 下一代：精英原样保留 + 锦标赛选父→(按 crossover_rate 两父交叉)→单点变异

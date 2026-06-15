@@ -30,7 +30,7 @@ from ga_loop import build_harness, run_ga, _decode_with_order
 from solver.fitness import fitness, fitness_breakdown
 
 W_POTION, W_KEY = 1.5, 39.0
-POP, GEN, SEED, XRATE = 15, 12, 20260614, 0.3
+POP, GEN, SEED, XRATE = 15, 10, 20260614, 0.3   # 小步起(pop15/gen10)·argparse 可覆盖(后续放大 pop25/gen15 不改码)
 
 
 def replay_player_until_floor(route_file, target_floor):
@@ -84,8 +84,17 @@ def show(label, state, roster, big, zone_fids):
 
 
 def main():
+    import argparse
+    ap = argparse.ArgumentParser(description="路线图② 上规模跑 GA 一区好解 + 三方对照")
+    ap.add_argument("--pop", type=int, default=POP)
+    ap.add_argument("--gen", type=int, default=GEN)
+    ap.add_argument("--seed", type=int, default=SEED)
+    ap.add_argument("--xrate", type=float, default=XRATE)
+    args, _ = ap.parse_known_args()       # parse_known：忽略 --persistent 等(本脚本恒 persistent=True 暖桶)
+    pop, gen, seed, xrate = args.pop, args.gen, args.seed, args.xrate
+
     print("=" * 78)
-    print(f"路线图② 小步上规模：pop={POP} gen={GEN} seed={SEED} 交叉={XRATE} 注入=[盾] 规整=默认开")
+    print(f"路线图② 小步上规模：pop={pop} gen={gen} seed={seed} 交叉={xrate} 注入=[盾] 规整=默认开")
     print("=" * 78)
 
     t0 = time.time()
@@ -98,6 +107,7 @@ def main():
     roster, big, zone_fids = H["roster_fit"], H["big"], H["zone_fids"]
     meta, dc, eval_fn = H["meta"], H["decode_cache"], H["eval_fn"]
     bm = H["block_markers"]                       # 块为目标：进包判据（_decode_with_order 块模式必传）
+    bc = meta["block_cells"]                       # §S15 禁区集：_decode_with_order 须与 eval_fn 同口径(禁区开)，否则展示终态/normalized 与 GA 实评不符
     sword, shield = meta["sword"], meta["shield"]   # 现为块 id（meta 角色→块 id），tag_of/sword 比较照旧
 
     print(f"\n  目标池 pool({len(H['pool'])}) = {H['pool']}")
@@ -116,21 +126,25 @@ def main():
     print("② GA 爬坡曲线(逐代：含盾? 剑第几进包? best fitness)")
     print("=" * 78)
 
+    valid_curve = []      # 逐代 (gen, 有效个体数, pop)·跑完画爬坡健康度曲线(判读③·先短后拼长)
+
     def logcb(gl):
         gene = gl.best_individual
         has_shield = shield in gene
-        _t, _f, norm, _vd = _decode_with_order(gene, start, zone, step_fn, dc, block_markers=bm)
+        _t, _f, norm, _vd = _decode_with_order(gene, start, zone, step_fn, dc, block_markers=bm, block_cells=bc)
         sword_pos = (norm.index(sword) + 1) if sword in norm else None
         sp = f"剑第{sword_pos}进包" if sword_pos else "剑未进包"
         sh = "含盾✅" if has_shield else "无盾  "
+        valid = pop - gl.n_invalid
+        valid_curve.append((gl.gen, valid, pop))
         print(f"  gen {gl.gen:2d}: best={gl.best_fitness:>11.1f}  {sh}  {sp:9s}  "
-              f"基因len={len(gene):2d}  进包len={len(norm):2d}  "
+              f"有效{valid:2d}/{pop:2d}  基因len={len(gene):2d}  进包len={len(norm):2d}  "
               f"uniq_evals={gl.n_unique_evals:3d}  spread=[{gl.spread_lo:.0f}..{gl.spread_hi:.0f}]")
 
     t1 = time.time()
-    res = run_ga(H["pool"], eval_fn, population=POP, generations=GEN,
-                 tournament_k=3, elite=2, crossover_rate=XRATE,
-                 inject=[[shield]], seed=SEED, log=logcb)
+    res = run_ga(H["pool"], eval_fn, population=pop, generations=gen,
+                 tournament_k=3, elite=2, crossover_rate=xrate,
+                 inject=[[shield]], seed=seed, log=logcb)
     t_ga = time.time() - t1
     climb = res.gen_best_fitness[-1] - res.gen_best_fitness[0]
     print(f"\n  ▸ gen_best = {[round(x, 1) for x in res.gen_best_fitness]}")
@@ -139,7 +153,7 @@ def main():
 
     # ── GA 最优解 → 解码终态 + normalized 真实进包序 ───────────────────────────
     best = res.best_individual
-    _tok, ga_final, ga_norm, _vd = _decode_with_order(best, start, zone, step_fn, dc, block_markers=bm)
+    _tok, ga_final, ga_norm, _vd = _decode_with_order(best, start, zone, step_fn, dc, block_markers=bm, block_cells=bc)
     print("\n" + "=" * 78)
     print("③ GA 最优解：基因(执行序) vs normalized(真实进包序)")
     print("=" * 78)
@@ -170,11 +184,21 @@ def main():
     print(f"  ② 含盾涌现：{'✅ 是' if has_shield else '❌ 否'}   "
           f"剑早涌现：{'剑第'+str(sword_pos)+'进包' if sword_pos else '剑未进包'}")
 
-    # ③ 血瓶软点探测：GA 主干显著弱于 689 但血瓶项不低于 689 → 疑似踩软点(属性平平+血瓶虚高)
+    # ③ 爬坡健康度(先短后拼长·§S21)：初代无效率高→进度分(INVALID_BASE+导航块×1000+最深层×10)把 GA 往有效序拽→末代有效率升
+    print(f"  ③ 爬坡健康(有效序列率·先短后拼长)：")
+    for gen_i, v, p in valid_curve:
+        bar = "█" * v + "░" * (p - v)
+        print(f"       gen {gen_i:2d}: 有效 {v:2d}/{p:2d}  {bar}")
+    if valid_curve:
+        v0, vN = valid_curve[0][1], valid_curve[-1][1]
+        trend = "✅ 有效率升(进度分把 GA 往有效序拽)" if vN > v0 else "＝持平" if vN == v0 else "⚠ 有效率降(查进度分梯度)"
+        print(f"       初代有效 {v0}/{valid_curve[0][2]} → 末代有效 {vN}/{valid_curve[-1][2]}  {trend}")
+
+    # ④ 血瓶软点探测：GA 主干显著弱于 689 但血瓶项不低于 689 → 疑似踩软点(属性平平+血瓶虚高)
     main_gap = bd_ga["main_equiv_hp"] - bd_689["main_equiv_hp"]   # <0 = GA 属性更弱
     potion_hoard = bd_ga["potion_term"] >= bd_689["potion_term"]   # 血瓶不低于 689
     soft_spot = (main_gap < -2000) and potion_hoard
-    print(f"  ③ 血瓶软点探测：GA主干−689主干={main_gap:+.1f}  GA血瓶={bd_ga['potion_term']:.0f} vs 689血瓶={bd_689['potion_term']:.0f}")
+    print(f"  ④ 血瓶软点探测：GA主干−689主干={main_gap:+.1f}  GA血瓶={bd_ga['potion_term']:.0f} vs 689血瓶={bd_689['potion_term']:.0f}")
     if soft_spot:
         print(f"     ⚠⚠ 疑似踩血瓶软点：GA 属性显著弱于 689(主干差{main_gap:.0f})却靠血瓶撑分 → 假优、别当真！")
     else:
