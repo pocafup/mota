@@ -361,6 +361,28 @@
 
 ---
 
+### §S22 规整删完（A 外科式）：序列有效性彻底治齐 + 地基清爽【已 commit cd98476·261 绿·下一步=跑训练】（2026-06-15）
+
+> 接 §S21（待拍3 已定"禁区跑通后单独删规整"）：序列有效性两半治齐（块内假序=块为目标 §S20·跨块顺路吸=禁区 §S21）后规整去重作用归零。本 session 单独棒删规整（**A 外科式**·先出读码报告、玩家拍范围再删）、已 commit `cd98476`。**序列有效性彻底治齐、地基清爽 → 下一步=上规模跑训练。**
+
+**【删除范围 = A 外科式（读码报告后玩家拍）】** 规整 =「算 normalized_order 真实进包序」+「拿它当 fitness 缓存键去重」两件事。读码定两条边界：
+- ★`_decode_with_order` 是**混合体**：进包追踪的 `taken` 被禁区 `forbidden_after(taken=)` 共用（ga_decode.py:53-62）→ **非纯规整、不能删**。
+- ★normalized_order 有**第二用途**：3 个 dump 脚本（含跑训练 `run_ga_zone1_scaleup.py`）拿它显示「真实进包序」给玩家用游戏眼睛判解（剑第几进包/盾排哪/顺不顺）→ **留作诊断**。
+- **删（纯去重消费·全在 `make_decode_fitness_eval`）**：`norm_cache` + 查存命中 + 写入 + `normalize`/`stats` 参（无调用方传）。去重**交回 `run_ga` 基因元组缓存 `fit_cache`**（同基因不重评·ga_loop.py:138-144）。
+- **留**：`_decode_with_order` 一字未动（normalized 照算照返回）；`taken`/`newly`/`_is_taken`/`_taken`/`_goal_markers`/`forbidden_after`（禁区核心）。
+- **测试**：`test_ga_normalize_guard.py` **整删**（含盾折叠测=已被禁区判无效覆盖 §S21③；执行一致性测=可删）；**+16826 生死线哨兵迁 `test_block_targets.py`**（与块 id 哨兵同源·都守"块划分别漂"）、改挂封板 decode+fitness（不经 normalized_order·与规整解耦）。
+- **零损失论证**：块为目标灭块内假序、禁区把含盾 [盾块,剑块] 直接判**无效**（不再"折叠"）→ norm_cache 折叠的等价基因不再产生（§S13 实测规整仅省 14% 评估且不改爬坡轨迹·那 14% 正是含盾折叠）。
+
+**【验收 4 项（玩家确认通过·先给 dump 再 commit）】**
+- ① +16826 哨兵 `test_block_targets.py::test_sword_early_16826_sentinel` 绿；dump 实测**禁区开/关都 Δ(剑早−剑晚)=+16826.0**（剑早-4792/剑晚-21618·X1/Y1 都 valid）。块边界漂移哨兵副作用保留。
+- ② GA 块解禁区下 decode 正常 + **进包序显示在**：整池 7 块禁区开 → invalid=False navigated=7、终态 MT4(7,9) HP72/23/21、tokens=665、normalized(真实进包序·7块) 完整打印（判读眼睛还在）。
+- ③ **beam 零影响**：4 守卫(big_item_pull/door_value/region_potential/pull)点名 **47 绿**。
+- ④ 全套 **261 passed**（= §S21 的 263 − 删的规整 3 slow 测 + 新增哨兵 1 slow 测）、1 无关既存 warning；grep `norm_cache|test_ga_normalize_guard|normalize=` 全仓**零残留**。
+
+**【★下一步=上规模跑训练（乙·序列有效性完整·干净地基）】** 跑前先 `python extract/ga_loop.py --persistent` 暖桶。**须带认知**：len7 随机序 100% 无效（禁区严=设计内）、GA 靠 INVALID_BASE 进度分梯度从短有效序往长有效序爬（**'先短后拼长'**）；有效长序确实存在（§S21④ 池序即是）。目标=路线图②上规模跑一区好解（追平/超 689·拉 tok788 三方对照）。
+
+---
+
 ## 🎯🎯🎯🎯🎯 下个会话主攻【2026-06-12·钥匙价值【已落地+阶段1实测完】→ 下个 session 做 Stage-2（红钥过 boss·γ+β_big 组合）·取代下方所有旧🎯】
 
 > **⚠ 2026-06-14 更新(§S13 拆墙✅已完成·commit 6c1de0f)·已被取代**：拆成本墙(持久化cache·63×·231绿)已完成 → 下个 session 主攻=【路线图②上规模跑一区好解(追平/超689·拉tok788三方对照)·跑前先 `--persistent` 暖桶】，**非本段红钥过 boss**。红钥长臂仍降级为"一区站稳后(§S13 路线图③)"。本段红钥/钥匙价值/剑盾破谷结论仍有效、留作③阶段输入，勿当下个 session 主攻。
