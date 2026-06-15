@@ -326,3 +326,104 @@ def test_inject_exceeding_population_raises():
     with pytest.raises(AssertionError):
         run_ga(POOL, ev, population=4, generations=2,
                 inject=[[i] for i in range(5)], seed=1)             # 5 注入 > 4 种群
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# §S23 早熟三旋钮：max_len / mutations_per_child / random_immigrants
+# （默认均=原版行为·字节级零回归；开启时行为正确·种群尺寸守恒·仍合法仍爬坡）
+# ════════════════════════════════════════════════════════════════════════════════
+
+def test_default_levers_byte_identical():
+    """三旋钮默认值(None/1/0)与完全不传 → 逐字节零回归（gen_best/最优个体/去重数/末代种群全同）。"""
+    ev = _ordered_target_eval(list(POOL))
+    a = run_ga(POOL, ev, population=16, generations=15, crossover_rate=0.5, seed=2024)
+    b = run_ga(POOL, ev, population=16, generations=15, crossover_rate=0.5, seed=2024,
+               max_len=None, mutations_per_child=1, random_immigrants=0)
+    assert a.gen_best_fitness == b.gen_best_fitness
+    assert a.best_individual == b.best_individual
+    assert a.n_unique_evals == b.n_unique_evals
+    assert [g for _, g in a.gen_history[-1]] == [g for _, g in b.gen_history[-1]]
+
+
+# ── max_len：长度上限 ─────────────────────────────────────────────────────────────
+def test_max_len_caps_all_genes():
+    """max_len=4 → 所有代、所有个体长度 ≤ 4（初代随机/变异 insert/交叉截长 全守上限）。"""
+    ev = _ordered_target_eval(list(POOL))
+    res = run_ga(POOL, ev, population=16, generations=20, crossover_rate=0.6,
+                 max_len=4, seed=20260613)
+    for gen in res.gen_history:
+        for _f, g in gen:
+            assert _is_valid_subset(g, POOL) and len(g) <= 4, g
+
+
+def test_max_len_operator_mutate_blocks_insert_at_cap():
+    """_mutate 在 len==max_len 时绝不 insert（只 swap/delete）→ 长度永不越上限。"""
+    rng = random.Random(7)
+    base = [0, 1, 2, 3]                                  # len4==cap
+    for _ in range(500):
+        child = _mutate(base, POOL, rng, max_len=4)
+        assert _is_valid_subset(child, POOL) and len(child) <= 4
+
+
+def test_max_len_crossover_truncates():
+    """_crossover 后代超 max_len → 截短到 max_len、仍无重合法。"""
+    rng = random.Random(8)
+    for _ in range(300):
+        p1 = _random_individual(POOL, rng)
+        p2 = _random_individual(POOL, rng)
+        child = _crossover(p1, p2, POOL, rng, max_len=3)
+        assert _is_valid_subset(child, POOL) and len(child) <= 3
+
+
+# ── mutations_per_child：复合变异步长 ─────────────────────────────────────────────
+def test_mutations_per_child_climbs_and_valid():
+    """每后代多次变异仍合法、仍爬坡（更大步长不破坏机器正确性）。"""
+    ev = _ordered_target_eval(list(POOL))
+    res = run_ga(POOL, ev, population=20, generations=30, elite=2,
+                 mutations_per_child=3, seed=20260613)
+    assert _is_valid_subset(res.best_individual, POOL)
+    gb = res.gen_best_fitness
+    assert all(gb[i + 1] >= gb[i] for i in range(len(gb) - 1)), gb     # 精英单调不降
+    assert gb[-1] > gb[0], gb                                          # 真爬坡
+
+
+# ── random_immigrants：每代注入新血抗塌缩 ────────────────────────────────────────
+def test_random_immigrants_population_conserved():
+    """注入随机移民后每代仍恰 population 个体（精英+移民被截顶、while 补满）。"""
+    ev = _ordered_target_eval(list(POOL))
+    res = run_ga(POOL, ev, population=12, generations=8, elite=2,
+                 random_immigrants=4, seed=5)
+    assert all(len(gen) == 12 for gen in res.gen_history)
+    for gen in res.gen_history:
+        for _f, g in gen:
+            assert _is_valid_subset(g, POOL)
+
+
+def test_random_immigrants_monotonic_elitism_holds():
+    """移民引入下行扰动，但精英仍保最优 → 每代最优单调不降（抗早熟不破坏爬坡铁律）。"""
+    ev = _ordered_target_eval(list(POOL))
+    res = run_ga(POOL, ev, population=20, generations=25, elite=2,
+                 random_immigrants=5, seed=20260613)
+    gb = res.gen_best_fitness
+    assert all(gb[i + 1] >= gb[i] for i in range(len(gb) - 1)), gb
+
+
+def test_random_immigrants_adds_diversity():
+    """移民>0 比移民=0 评估更多唯一基因（新血确实进了种群·非空操作）。"""
+    ev = _ordered_target_eval(list(POOL))
+    base = run_ga(POOL, ev, population=20, generations=20, seed=20260613)
+    immi = run_ga(POOL, ev, population=20, generations=20,
+                  random_immigrants=6, seed=20260613)
+    assert immi.n_unique_evals > base.n_unique_evals
+
+
+def test_levers_reproducible():
+    """三旋钮全开下同 seed 仍可复现（随机源被 seed 钉死）。"""
+    ev = _ordered_target_eval(list(POOL))
+    kw = dict(population=18, generations=15, crossover_rate=0.6,
+              max_len=5, mutations_per_child=2, random_immigrants=4, seed=4242)
+    a = run_ga(POOL, ev, **kw)
+    b = run_ga(POOL, ev, **kw)
+    assert a.gen_best_fitness == b.gen_best_fitness
+    assert a.best_individual == b.best_individual
+    assert a.n_unique_evals == b.n_unique_evals
