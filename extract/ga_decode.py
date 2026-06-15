@@ -44,6 +44,27 @@ def goal_to_cell(goal):
     return goal
 
 
+def forbidden_after(targets, idx, block_cells, taken=None):
+    """§S15 禁区集：导航 targets[idx] 这一腿时【不得踏入】的 cell 集——排在它【之后】、且【尚未进包】的
+    块的初始 block_cells 并集。治【跨块顺路吸】（去盾顺路把还没轮到的剑块吸进包＝剑早进＝谎报）。
+    纯结构函数（无副作用、不读 fitness）：targets=基因目标序、idx=当前腿下标、block_cells={块 id: frozenset
+      ((fid,x,y),...)}、taken=已进包目标集合（None＝都没进包）。
+    · block_cells 为空/None（cell 模式）→ 返回空集 → navigate_to 字节回到封板（零回归）。
+    · 排除自身（不禁当前目标）+ 排除已进包后续块（taken 命中——禁其已空 cell 只会无谓挡路）。
+      注：禁区一旦从首腿生效，后续块在轮到自己前【绝不会被提前吸】（每条更早的腿都禁着它）→ taken 过滤
+      实际只挡「起点态就已被收掉的块」这一边角，但保留它＝严格按"未进包"口径、不做隐含假设。
+    · 后续目标若非块 id（混合/cell 模式）→ 不在 block_cells、自然跳过。"""
+    if not block_cells:
+        return frozenset()
+    cur = targets[idx]
+    taken = taken or frozenset()
+    later = [g for g in targets[idx + 1:]
+             if g != cur and g not in taken and g in block_cells]
+    if not later:
+        return frozenset()
+    return frozenset().union(*(block_cells[g] for g in later))
+
+
 def decode(chromosome, start_state, zone, step_fn, *, cache=_DEFAULT_CACHE, max_pops=8000):
     """见模块头契约。返回 (action_tokens: list, final_state)。
     cache：navigate_to 缓存外壳的 cache 形参（GA 内循环反复导航同几个目标 → 命中省算）。

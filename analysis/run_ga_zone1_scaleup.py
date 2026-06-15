@@ -119,7 +119,7 @@ def main():
     def logcb(gl):
         gene = gl.best_individual
         has_shield = shield in gene
-        _t, _f, norm = _decode_with_order(gene, start, zone, step_fn, dc, block_markers=bm)
+        _t, _f, norm, _vd = _decode_with_order(gene, start, zone, step_fn, dc, block_markers=bm)
         sword_pos = (norm.index(sword) + 1) if sword in norm else None
         sp = f"剑第{sword_pos}进包" if sword_pos else "剑未进包"
         sh = "含盾✅" if has_shield else "无盾  "
@@ -139,7 +139,7 @@ def main():
 
     # ── GA 最优解 → 解码终态 + normalized 真实进包序 ───────────────────────────
     best = res.best_individual
-    _tok, ga_final, ga_norm = _decode_with_order(best, start, zone, step_fn, dc, block_markers=bm)
+    _tok, ga_final, ga_norm, _vd = _decode_with_order(best, start, zone, step_fn, dc, block_markers=bm)
     print("\n" + "=" * 78)
     print("③ GA 最优解：基因(执行序) vs normalized(真实进包序)")
     print("=" * 78)

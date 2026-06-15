@@ -49,7 +49,7 @@ def cooked():
     out = {}
     for name, g in genes.items():
         _t1, final_dec = decode(g, start, zone, step, cache=cache)
-        _t2, final_ord, norm = _decode_with_order(g, start, zone, step, cache, block_markers=bm)
+        _t2, final_ord, norm, _vd = _decode_with_order(g, start, zone, step, cache, block_markers=bm)
         f = fitness(final_dec, h["roster_fit"], h["big"], h["zone_fids"],
                     w_potion=1.5, w_key=39.0)
         out[name] = dict(gene=g, final_dec=final_dec, final_ord=final_ord, norm=norm, fit=f)

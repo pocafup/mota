@@ -52,11 +52,59 @@ sys.path.insert(0, str(Path(__file__).parent.parent))   # solver / sim
 sys.path.insert(0, str(Path(__file__).parent))           # vzone（同目录）
 
 from solver.quotient import (
-    _free_cells, _bfs_moves, _boundary_ops, _expand_op, _absorb, _qfp,
+    _free_cells, _bfs_moves, _boundary_ops, _expand_op, _absorb, _qfp, _zone_blocked,
 )
 from vzone import _passable, _NB4
 
 _INF = float("inf")
+
+
+# ═══ 禁区（§S15 序列有效性的另一半）：navigate_to 定向走向块 X 时，禁止踏入「排在 X 之后、尚未进包」
+#     的块的任何 cell——治【跨块顺路吸】（去盾顺路把还没轮到的剑块吸进包＝剑早进＝谎报）与 navigate 选路
+#     bias。forbidden=那些后续块的初始 block_cells 并集（跨层 (fid,x,y)）。够不到禁区外的路 → 该腿无解
+#     （上层据此判情况1够不到/情况2被禁逼死），navigate_to 本身只管「带禁区能否走到」，绝不换序。═══
+
+def _zb_with_forbidden(state, forbidden):
+    """把禁区 cell 投影成 _free_cells 用的 zone_blocked（领域伤格∪本层禁区格）。
+    forbidden 是跨层 (fid,x,y)，而 _free_cells 的 floodfill 只看英雄【当前层】、zone_blocked 是无 fid 的
+    (x,y) 集 → 须按 state.current_floor 把禁区投影到当前层。
+    · forbidden 空 / 禁区全在别层 → 返回 None：让 _free_cells 走原路自算 _zone_blocked，【字节级零回归】
+      （None 分支即封板前的原始代码路径，非新行为）。"""
+    if not forbidden:
+        return None
+    cur = state.current_floor
+    fb_here = {(x, y) for (fid, x, y) in forbidden if fid == cur}
+    if not fb_here:
+        return None
+    return _zone_blocked(state) | fb_here
+
+
+def _absorb_avoiding(state, step_fn, forbidden):
+    """_absorb 的禁区版：复刻 quotient._absorb，【唯一差别】是 _free_cells 传 zone_blocked=本层禁区∪领域
+    伤格 → 禁区 cell 被排出自由块（既不被吸纳、也不可踏过，等效一堵墙）。forbidden 空 → 直接走原 _absorb
+    （字节级零回归）。块内零损血、顺序无关、装备扩边界跑到不动点——与 _absorb 一致。"""
+    if not forbidden:
+        return _absorb(state, step_fn)
+    moves_all = []
+    s = state
+    while True:
+        free = _free_cells(s, zone_blocked=_zb_with_forbidden(s, forbidden))
+        floor = s.floor
+        target = None
+        for (x, y) in free:
+            if floor.entities[y][x] in floor._tile_to_item:
+                target = (x, y)
+                break
+        if target is None:
+            return s, moves_all
+        path = _bfs_moves(s, free, target)
+        if not path:
+            return s, moves_all
+        for m in path:
+            s = step_fn(s, m)
+            if s.dead:
+                return s, moves_all
+        moves_all.extend(path)
 
 
 def _hop_field_to_goal(zone, goal_cell):
@@ -138,11 +186,13 @@ def _nav_key(state):
             state.dead, state.won, state.auto_mode)
 
 
-def _navigate_to_uncached(start_state, goal_cell, zone, step_fn, max_pops=8000):
+def _navigate_to_uncached(start_state, goal_cell, zone, step_fn, max_pops=8000, forbidden=frozenset()):
     """定向走向单个 goal_cell=(fid,x,y)。返回 (final_state, moves:list, reached:bool)。契约/选型见模块头。
     GBFS：前沿按【结构 hop 距离】升序弹（次键 path-length 破平台、末键序号保堆稳定）；visited 用
     【支配剪枝】（同 _qfp 块只留非被支配资源向量）压跨层 clearing 爆炸。
-    max_pops：前沿弹出护栏（失控/真不可达兜底）。"""
+    max_pops：前沿弹出护栏（失控/真不可达兜底）。
+    forbidden（§S15 禁区）：跨层 (fid,x,y) 集，导航全程不得踏入（既不吸纳也不路过）——经 _zb_with_forbidden
+      投影进每处 _free_cells/_absorb_avoiding 的 zone_blocked。空集 → 字节级回到原行为。"""
     gfid, gx, gy = goal_cell
     hop = _hop_field_to_goal(zone, goal_cell)
 
@@ -166,8 +216,9 @@ def _navigate_to_uncached(start_state, goal_cell, zone, step_fn, max_pops=8000):
         return False
 
     # 进块即吸光块内零损血道具（钥匙/宝石/装备）——没钥匙开不了门、到不了楼梯。失败仍返回【原始入口态】。
-    s0, m0 = _absorb(start_state, step_fn)
-    start_free = _free_cells(s0)
+    # 禁区版 _absorb_avoiding：吸纳时也绕开 forbidden（治去盾顺路吸剑块的根）。
+    s0, m0 = _absorb_avoiding(start_state, step_fn, forbidden)
+    start_free = _free_cells(s0, zone_blocked=_zb_with_forbidden(s0, forbidden))
     seen_or_add(s0, start_free)
     # 前沿元素 (h=结构距离, g_dmg=累计真损血, length=步数, counter 序号 tiebreak, state, 动作 tuple)。
     # 排序键 (h, g_dmg, length)：h 主【定向不塌缩】；同结构进度下 g_dmg 次【偏低损血路】（_absorb 零损血→
@@ -179,7 +230,7 @@ def _navigate_to_uncached(start_state, goal_cell, zone, step_fn, max_pops=8000):
     while frontier and pops < max_pops:
         pops += 1
         _, g_dmg, _, _, s, moves = heapq.heappop(frontier)
-        free = _free_cells(s)
+        free = _free_cells(s, zone_blocked=_zb_with_forbidden(s, forbidden))
 
         # 够到：goal 已在当前自由块内 → 块内 BFS 走过去（沿途踩到即拾取）、首达即返回单路
         if s.current_floor == gfid and (gx, gy) in free:
@@ -206,10 +257,10 @@ def _navigate_to_uncached(start_state, goal_cell, zone, step_fn, max_pops=8000):
             if child.floor._event_intercepting:
                 continue                      # 商人/祭坛 CHOICE：导航器不决策买卖（留空接口给 GA 层）
             op_dmg = max(0, s.hero.hp - child.hero.hp)   # 该算子真损血（_absorb 前取；_absorb 零损血不计）
-            child, abs_moves = _absorb(child, step_fn)   # 进新块即吸光道具（捡钥匙→后续能开门）
+            child, abs_moves = _absorb_avoiding(child, step_fn, forbidden)   # 进新块即吸光道具（绕禁区）
             if child.dead:
                 continue
-            child_free = _free_cells(child)
+            child_free = _free_cells(child, zone_blocked=_zb_with_forbidden(child, forbidden))
             if seen_or_add(child, child_free):
                 continue
             child_moves = moves + tuple(op_moves) + tuple(abs_moves)
@@ -226,23 +277,26 @@ def _navigate_to_uncached(start_state, goal_cell, zone, step_fn, max_pops=8000):
 _NAV_CACHE = {}   # 模块级默认缓存，按 id(zone) 分桶。GA 可传专用 dict；cache=None 则禁用(对照/调试)。
 
 
-def navigate_to(start_state, goal_cell, zone, step_fn, max_pops=8000, cache=_NAV_CACHE):
+def navigate_to(start_state, goal_cell, zone, step_fn, max_pops=8000, cache=_NAV_CACHE, forbidden=frozenset()):
     """navigate_to 的缓存外壳：【不改 GBFS 一步】，只在 _navigate_to_uncached 外包 memoization。
     动机：GA 一代上百个体反复导航到同样几个目标(剑/盾等大件就那么几个)——(规整起点态, 目标)相同 → 直接
     返缓存、省掉重复搜索。命中返回与首算【逐字段一致】的 (final, moves, reached)(正确性见 _nav_key)。
     cache：默认模块级 _NAV_CACHE(测试/GA 共享、按 id(zone) 分桶防串味)；传 None → 禁用、字节回到原行为；
       传自有 dict → 专用缓存。拦截态入口(罕见、pending 难规整成键)直接绕过缓存，行为同原算法。
+    forbidden（§S15 禁区）：纳入缓存键 frozenset(forbidden)——禁区不同 → 同(起点,目标)也是不同搜索、不可
+      串味；空集时与封板行为一致(键多一个空 frozenset、不影响命中正确性)。判无效上层会以「带禁区 vs 不带
+      禁区」两次调用区分情况1/情况2，不带禁区那次因键不同独立命中、近免费。
     返回值约定与原函数一致：成功 (final_state, moves:list, True)；够不到 (入口态本体, [], False)。
     命中时 moves 返回新 list 副本(调用方可安全改)，final_state 返回缓存引用(step 纯函数→不会被就地改写)。"""
     if cache is None or start_state.floor._event_intercepting:
-        return _navigate_to_uncached(start_state, goal_cell, zone, step_fn, max_pops)
-    key = (id(zone), max_pops, goal_cell, _nav_key(start_state))
+        return _navigate_to_uncached(start_state, goal_cell, zone, step_fn, max_pops, forbidden)
+    key = (id(zone), max_pops, goal_cell, frozenset(forbidden), _nav_key(start_state))
     hit = cache.get(key)
     if hit is not None:
         final, moves_t, reached = hit
         if reached:
             return final, list(moves_t), True
         return start_state, [], False         # 原子失败命中：返回【当前入口态本体】保 `final is start` 契约
-    final, moves, reached = _navigate_to_uncached(start_state, goal_cell, zone, step_fn, max_pops)
+    final, moves, reached = _navigate_to_uncached(start_state, goal_cell, zone, step_fn, max_pops, forbidden)
     cache[key] = (final if reached else None, tuple(moves), reached)
     return final, moves, reached

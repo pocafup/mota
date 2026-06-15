@@ -100,7 +100,7 @@ def dump2_lifeline(H):
     Y1 = keys + [sword]                # 剑块晚
     out = {}
     for nm, g in (("X1 剑早", X1), ("Y1 剑晚", Y1)):
-        _t, final, norm = _decode_with_order(g, start, zone, step_fn, cache, block_markers=bm)
+        _t, final, norm, _vd = _decode_with_order(g, start, zone, step_fn, cache, block_markers=bm)
         f = fitness(final, roster, big, zfids, w_potion=W_POTION, w_key=W_KEY)
         h = final.hero
         out[nm] = (norm, f, final)
@@ -217,7 +217,7 @@ def dump4_decode(H):
     _decode_verbose(best, start, zone, step_fn, cache, bm, meta, "GA 最优解")
 
     # normalized 真实进包序（玩家据此用游戏眼睛看"先拿盾→顺路吸剑→五钥…"对不对）
-    _tk, final, norm = _decode_with_order(best, start, zone, step_fn, cache, block_markers=bm)
+    _tk, final, norm, _vd = _decode_with_order(best, start, zone, step_fn, cache, block_markers=bm)
     f = fitness(final, roster, big, zfids, w_potion=W_POTION, w_key=W_KEY)
     print(f"\n  ★normalized 真实进包块序（{len(norm)} 块·玩家据此判像不像样）=")
     for j, b in enumerate(norm, 1):

@@ -26,9 +26,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))   # solver / sim
 sys.path.insert(0, str(Path(__file__).resolve().parent))           # ga_decode / vzone 同目录
 
-from ga_decode import decode, goal_to_cell         # noqa: E402（goal_to_cell：块 id→代表 cell 归一）
+from ga_decode import decode, goal_to_cell, forbidden_after   # noqa: E402（goal_to_cell：块 id→代表 cell；forbidden_after：§S15 禁区集）
 from ga_navigate import navigate_to                # noqa: E402（规整层复刻 decode 的目标串需直接调）
-from solver.fitness import fitness                 # noqa: E402
+from solver.fitness import fitness, INVALID_BASE, _depth_of   # noqa: E402（§S15 无效态地板 + 推进度梯度）
 
 
 def _dedup(seq):
@@ -209,7 +209,7 @@ def _goal_markers(goal, block_markers):
 
 
 def _decode_with_order(chromosome, start_state, zone, step_fn, cache, *, max_pops=8000,
-                       block_markers=None):
+                       block_markers=None, block_cells=None):
     """复刻封板 decode 的逐目标 navigate_to 串（decode 一字不改），额外产 normalized_order ＝ 基因目标
     【真正进包的全局先后序】。终态【必与 decode(...) 逐字段一致】（tests/test_ga_normalize_guard 钉死）。
       进包判定（复刻验证脚本的腿级 _taken）：一腿 navigate_to 前后，某目标的【判据 cell 全部】由「有」变
@@ -218,7 +218,13 @@ def _decode_with_order(chromosome, start_state, zone, step_fn, cache, *, max_pop
         进包时序「顺路 < goal」是硬事实（非脆弱 tiebreak）；多个顺路按 cell/块 id 排序（确定性、保去重稳定）。
     block_markers（块为目标）：{块 id: frozenset(pool 物品 cell)}。给则按块判进包、normalized 为块 id 序；
       不给（None）→ cell 模式、与封板单物品口径【字节一致】（targets/normalized 皆为 cell）。
-    返回 (tokens, final_state, normalized_order: tuple[目标])。"""
+    block_cells（§S15 禁区·块为目标）：{块 id: frozenset((fid,x,y),...)}。给则每腿禁「排其后未进包块」的全
+      cell（forbidden_after）→ navigate_to 绕禁区走（治跨块顺路吸）；带禁区够不到时【不带禁区重跑一次】区分：
+      情况1 不带也够不到（无钥/真不可达）→ 同封板跳过、不淘汰；情况2 不带能到（唯一通路须踏入后续块）→ 此
+      排序物理不可实现 → 标 invalid、整条作废（§S15 绝不换序）。None → 禁区关、navigate_to 字节回封板。
+    返回 (tokens, final_state, normalized_order: tuple[目标], verdict)；verdict={"invalid":bool,
+      "navigated":已导航腿数, "depth":最深层下标}——invalid 时供 eval 层算 INVALID_BASE+进度分
+      （κ=1：verdict 是 decode 的结构产物、不调 fitness、不反馈任何中途推进）。"""
     targets = list(chromosome)                      # 基因目标（钉死点 1：本就无重复有序）；cell 或块 id
     markers = {g: _goal_markers(g, block_markers) for g in targets}
 
@@ -229,14 +235,27 @@ def _decode_with_order(chromosome, start_state, zone, step_fn, cache, *, max_pop
     tokens = []
     taken = {g: _is_taken(g, state) for g in targets}   # 已进包的目标（起点一般全 False）
     normalized = []
-    for goal in chromosome:
+    navigated = 0                                       # 成功导航到的腿数（进度分·区分无效序列优劣）
+    invalid = False
+    for i, goal in enumerate(chromosome):
         if state.dead or state.won:                 # 与 decode 同：死亡/通关冻结即停
             break
+        forbidden = forbidden_after(                # §S15：排本目标之后、未进包块的全 cell（块模式才非空）
+            targets, i, block_cells, taken=frozenset(g for g in targets if taken[g]))
         final, moves, reached = navigate_to(        # 块 id→代表 cell 归一（封板件 navigate_to 不动）
-            state, goal_to_cell(goal), zone, step_fn, max_pops=max_pops, cache=cache)
+            state, goal_to_cell(goal), zone, step_fn, max_pops=max_pops, cache=cache,
+            forbidden=forbidden)
+        if not reached and forbidden:               # §S15 判无效：带禁区够不到 → 不带禁区重跑一次区分情况
+            _f2, _m2, reached_free = navigate_to(   # 缓存键含 forbidden → 空禁区那次是独立条目（命中近免费）
+                state, goal_to_cell(goal), zone, step_fn, max_pops=max_pops, cache=cache)
+            if reached_free:                        # 情况2：唯一通路须踏入后续块 → 排序不可实现 → 整条无效
+                invalid = True
+                break
+            # 情况1：不带禁区也够不到（无钥/打不过/真不可达）→ 与封板 decode 同·跳过本目标、继续下一个
         if reached:                                 # 与 decode 同：够不到则原子失败、state 不变、跳过
             state = final
             tokens.extend(moves)
+            navigated += 1
         newly = [g for g in targets if not taken[g] and _is_taken(g, state)]   # 这一腿新进包（含顺路吸）
         for g in newly:
             taken[g] = True
@@ -244,19 +263,29 @@ def _decode_with_order(chromosome, start_state, zone, step_fn, cache, *, max_pop
         normalized.extend(side)
         if goal in newly:                              # 本腿目标这一步真拿到 → 排在顺路之后
             normalized.append(goal)
-    return tokens, state, tuple(normalized)
+    verdict = {"invalid": invalid, "navigated": navigated, "depth": _depth_of(state)}
+    return tokens, state, tuple(normalized), verdict
 
 
 # ─── eval 注入：把封板四零件包成 eval_fn（基因→decode→终态→fitness）────────────────────────
 
+def _invalid_score(verdict):
+    """§S15 序列无效态评分：恒 ≪ 死亡带的 INVALID_BASE + 进度分（已导航腿数·最深层）。进度分量级 ≤
+    1000×7+10×50≈7050，远小于无效带与死亡带间距 1e9 → 无效序列彼此有梯度（导航越多/越深越高·GA 朝可实现
+    排序爬），整段恒压在死亡态之下。绝不调 fitness()（κ=1：fitness 只评可实现终态）。"""
+    return INVALID_BASE + 1000.0 * verdict["navigated"] + 10.0 * verdict["depth"]
+
+
 def make_decode_fitness_eval(start, zone, step_fn, roster, big, zone_fids, *,
                              w_potion=1.5, w_key=39.0, decode_cache=None,
-                             normalize=True, stats=None, block_markers=None):
+                             normalize=True, stats=None, block_markers=None, block_cells=None):
     """构造 eval_fn(gene)->fitness：复刻 decode（_decode_with_order 串 navigate_to）跑全程 → fitness 终评。
     decode_cache：navigate_to 缓存（GA 内反复导航同几个目标[尤其 26s 盾] → 命中近免费）。
       不传则本函数自建一个、整个 GA 共享 → 同(中途态,目标)只冷算一次。返回 (eval_fn, decode_cache)。
     规整（§S12 必做层）：以 normalized_order（真正进包先后序）为 fitness 缓存键 → 等价基因（同进包序→
       同终态）只评一次。【不改 fitness 值】：等价基因终态全同→分本就相等，缓存命中返回的就是应得值。
+    block_cells（§S15 禁区）：给则 _decode_with_order 每腿带禁区导航；某腿判无效 → eval 直接返 _invalid_score
+      （INVALID_BASE+进度分），不入 norm_cache、不调 fitness（run_ga 基因元组缓存已对同基因去重）。None → 禁区关。
     normalize=False：旁路 norm_cache（规整【关】·对照诊断用）→ 每个不同基因元组都评 fitness（run_ga 的
       基因元组缓存仍去重）；默认 True 与现状逻辑等价。stats：可选 dict，旁路计真实 fitness() 冷算次数
       （stats['fitness_calls']·规整开/关省多少评估的诊断键），默认 None 零开销。两参数仅诊断、不入产品路径。"""
@@ -265,8 +294,11 @@ def make_decode_fitness_eval(start, zone, step_fn, roster, big, zone_fids, *,
     norm_cache = {}     # normalized_order -> fitness：等价基因评估去重（§S12 必做层）
 
     def eval_fn(gene):
-        _tokens, final, normalized = _decode_with_order(
-            gene, start, zone, step_fn, decode_cache, block_markers=block_markers)
+        _tokens, final, normalized, verdict = _decode_with_order(
+            gene, start, zone, step_fn, decode_cache,
+            block_markers=block_markers, block_cells=block_cells)
+        if verdict["invalid"]:                       # §S15 序列结构无效 → 整条作废、给可区分差分（不评 fitness）
+            return _invalid_score(verdict)
         if normalize and normalized in norm_cache:  # 等价基因（同进包序）→ 复用、不重算 fitness
             return norm_cache[normalized]
         if stats is not None:                       # 诊断计数：真实 fitness() 冷算次数（默认 None 零开销）
@@ -410,7 +442,7 @@ def build_harness(*, persistent=False):
         decode_cache_in = PersistentNavCache()
     eval_fn, decode_cache = make_decode_fitness_eval(
         start, zone, step, roster_fit, big, zone_fids, decode_cache=decode_cache_in,
-        block_markers=block_markers)
+        block_markers=block_markers, block_cells=meta["block_cells"])   # §S15 禁区开
 
     return dict(start=start, zone=zone, step=step, pool=pool, meta=meta, ranked=ranked,
                 big_cells=big_cells, cands=cands, info_key=info_key,
@@ -473,8 +505,12 @@ def main():
         tag = ("剑" if g == meta["sword"] else "盾" if g == meta["shield"]
                else "钥" if g in meta["keys"] else "宝石" if g in meta["gems"] else "?")
         print(f"      {g}  [{tag}]")
-    tokens, final = decode(best, H["start"], H["zone"], H["step"], cache=H["decode_cache"])
+    tokens, final, _norm, verdict = _decode_with_order(   # §S15 禁区下导出·与 eval 同口径（非封板 decode）
+        best, H["start"], H["zone"], H["step"], H["decode_cache"],
+        block_markers=H["block_markers"], block_cells=meta["block_cells"])
     fh = final.hero
+    if verdict["invalid"]:
+        print("  ⚠ 最优个体被判序列无效（§S15）——全种群均无可实现排序，宜扩 pop/gen 或复核目标池")
     print(f"\n  解码终态: {final.current_floor}({fh.x},{fh.y}) HP={fh.hp} ATK={fh.atk} "
           f"DEF={fh.def_} keys={dict(fh.keys)}  tokens={len(tokens)}")
     print(f"  最优 fitness = {res.best_fitness:.1f}   (对照 fitness(689)={f689:.1f})")
