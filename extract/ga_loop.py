@@ -181,14 +181,14 @@ def run_ga(pool, eval_fn, *, population=12, generations=6, tournament_k=3,
     return GAResult(gen_best, best[1], best[0], len(fit_cache), history)
 
 
-# ─── 解码后规整（§S12 自欺序列真解·必做层）──────────────────────────────────────────
-# 病：navigate_to 走向某目标会【顺路吸】路径上的别的目标（剑/顺路宝石）——GA 以为在搜「剑排第几」，
-#   实际剑总被顺路吸、排第几 decode 终态都一样＝自欺序列（§S11）。但「剑早拿」在【无盾解】里有真实价值
-#   （Δ+16826，§S12 铁证）＝不能剔剑。真解＝解码后【规整】：把基因目标按【真正进包的全局先后序】排成
-#   normalized_order，等价基因（同进包序→同终态）共享 fitness 缓存去重——含盾 [盾,剑]≡[剑,盾] 折叠、
-#   无盾 [剑,5钥]≠[5钥,剑] 不折叠。规整【不改 fitness 值】（终态本就同→分本就等）、只省重复评估。
-# 红线：封板件（decode/navigate_to/fitness/detect_*）一字不改；规整只在此 eval 层复刻 decode 的目标串、
-#   旁加进包追踪；不剔目标、不写死顺序；beam 零影响（本文件 GA 专用、beam 不 import）。
+# ─── _decode_with_order：复刻封板 decode 的目标串 + 进包追踪（产 normalized_order·诊断用）──────────
+# navigate_to 走向某目标会【顺路吸】路径上的别的目标（剑/顺路宝石）。_decode_with_order 复刻封板 decode
+#   的逐目标 navigate_to 串、逐腿追踪真实进包、产 normalized_order（基因目标真正进包的全局先后序）。
+# ★序列有效性两半已根治：块为目标灭块内假序（§S20）、禁区把跨块顺路吸判无效（§S21）→【解码后规整去重已退役】
+#   （§S21：原规整去重折叠的等价基因不再产生；去重交回 run_ga 基因元组缓存）。normalized_order 仍照产、
+#   现仅供 dump 脚本显示「真实进包序」（玩家用游戏眼睛判 GA 解：剑第几进包 / 盾排哪 / 顺不顺）。
+# 进包追踪的 taken 仍被禁区 forbidden_after 共用（知道哪些后续块已进包）→ 保留、非规整专属。
+# 红线：封板件（decode/navigate_to/fitness/detect_*）一字不改；不剔目标、不写死顺序；beam 零影响（beam 不 import）。
 
 def _taken(state, cell):
     """目标格是否已空（道具被拿走＝已进包）。复刻 analysis/ga_sword_order_fitness_check.py 的同名判定：
@@ -211,7 +211,7 @@ def _goal_markers(goal, block_markers):
 def _decode_with_order(chromosome, start_state, zone, step_fn, cache, *, max_pops=8000,
                        block_markers=None, block_cells=None):
     """复刻封板 decode 的逐目标 navigate_to 串（decode 一字不改），额外产 normalized_order ＝ 基因目标
-    【真正进包的全局先后序】。终态【必与 decode(...) 逐字段一致】（tests/test_ga_normalize_guard 钉死）。
+    【真正进包的全局先后序】。终态【必与 decode(...) 逐字段一致】（复刻封板 decode·禁区关时字节回封板）。
       进包判定（复刻验证脚本的腿级 _taken）：一腿 navigate_to 前后，某目标的【判据 cell 全部】由「有」变
         「空」＝这一腿进包。cell 模式判据 = 目标自身；块模式判据 = 该块折进的全部 pool 物品 cell（_goal_markers）。
       腿内序：顺路吸的（非本腿 goal）排前、本腿 goal 排后——顺路道具物理上必在走到 goal【之前】被踩，
@@ -278,35 +278,25 @@ def _invalid_score(verdict):
 
 def make_decode_fitness_eval(start, zone, step_fn, roster, big, zone_fids, *,
                              w_potion=1.5, w_key=39.0, decode_cache=None,
-                             normalize=True, stats=None, block_markers=None, block_cells=None):
+                             block_markers=None, block_cells=None):
     """构造 eval_fn(gene)->fitness：复刻 decode（_decode_with_order 串 navigate_to）跑全程 → fitness 终评。
     decode_cache：navigate_to 缓存（GA 内反复导航同几个目标[尤其 26s 盾] → 命中近免费）。
       不传则本函数自建一个、整个 GA 共享 → 同(中途态,目标)只冷算一次。返回 (eval_fn, decode_cache)。
-    规整（§S12 必做层）：以 normalized_order（真正进包先后序）为 fitness 缓存键 → 等价基因（同进包序→
-      同终态）只评一次。【不改 fitness 值】：等价基因终态全同→分本就相等，缓存命中返回的就是应得值。
     block_cells（§S15 禁区）：给则 _decode_with_order 每腿带禁区导航；某腿判无效 → eval 直接返 _invalid_score
-      （INVALID_BASE+进度分），不入 norm_cache、不调 fitness（run_ga 基因元组缓存已对同基因去重）。None → 禁区关。
-    normalize=False：旁路 norm_cache（规整【关】·对照诊断用）→ 每个不同基因元组都评 fitness（run_ga 的
-      基因元组缓存仍去重）；默认 True 与现状逻辑等价。stats：可选 dict，旁路计真实 fitness() 冷算次数
-      （stats['fitness_calls']·规整开/关省多少评估的诊断键），默认 None 零开销。两参数仅诊断、不入产品路径。"""
+      （INVALID_BASE+进度分），不调 fitness（run_ga 基因元组缓存已对同基因去重）。None → 禁区关。
+    去重：靠 run_ga 的基因元组缓存（fit_cache）→ 同基因不重复评估。解码后规整去重已退役（§S21：块为目标灭
+      块内假序、禁区把跨块顺路吸判无效 → 不再产生需折叠的等价基因）；_decode_with_order 仍产 normalized_order、
+      仅供 dump 诊断显示真实进包序。"""
     if decode_cache is None:
         decode_cache = {}
-    norm_cache = {}     # normalized_order -> fitness：等价基因评估去重（§S12 必做层）
 
     def eval_fn(gene):
-        _tokens, final, normalized, verdict = _decode_with_order(
+        _tokens, final, _normalized, verdict = _decode_with_order(
             gene, start, zone, step_fn, decode_cache,
             block_markers=block_markers, block_cells=block_cells)
         if verdict["invalid"]:                       # §S15 序列结构无效 → 整条作废、给可区分差分（不评 fitness）
             return _invalid_score(verdict)
-        if normalize and normalized in norm_cache:  # 等价基因（同进包序）→ 复用、不重算 fitness
-            return norm_cache[normalized]
-        if stats is not None:                       # 诊断计数：真实 fitness() 冷算次数（默认 None 零开销）
-            stats["fitness_calls"] = stats.get("fitness_calls", 0) + 1
-        f = fitness(final, roster, big, zone_fids, w_potion=w_potion, w_key=w_key)
-        if normalize:
-            norm_cache[normalized] = f
-        return f
+        return fitness(final, roster, big, zone_fids, w_potion=w_potion, w_key=w_key)
 
     return eval_fn, decode_cache
 

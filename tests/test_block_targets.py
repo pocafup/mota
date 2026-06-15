@@ -70,3 +70,35 @@ def test_deterministic():
     assert a["block_rep"] == b["block_rep"]
     assert a["block_cells"] == b["block_cells"]
     assert a["blocks_by_floor"] == b["blocks_by_floor"]
+
+
+# ─── +16826 生死线·块边界漂移哨兵（§S20/S21·规整退役后从护栏单测迁来·改挂 fitness）──
+# 无盾 [剑块,5钥块] vs [5钥块,剑块]：剑块 MT5 / 钥块 MT4 异层必不同块 → 天然不可折叠（结构性·非靠规整）。
+# Δfitness(剑早−剑晚)=+16826.0 是无盾解「剑该早拿」的核心信号（§S12 铁证），同时兼【块边界漂移哨兵】：
+# 剑/钥块若误并入宝石块 → 终态变 → fitness 变 → Δ 漂 → 本测红。规整去重退役后 Δ 直接由封板 decode+fitness
+# 算（不经 normalized_order）→ 哨兵与规整解耦、独立守住。真 navigate_to 深算 → 标 slow。
+@pytest.fixture(scope="module")
+def sword_order_fits():
+    """无盾剑早 X1=[剑块]+5钥块 / 剑晚 Y1=5钥块+[剑块] 各 decode→fitness（共享 decode_cache·只冷算一次）。"""
+    from ga_loop import build_harness          # 重 import 局部化 → 不拖慢本文件快测 collection
+    from ga_decode import decode
+    from solver.fitness import fitness
+    h = build_harness()
+    start, zone, step = h["start"], h["zone"], h["step"]
+    cache = h["decode_cache"]
+    m = h["meta"]
+    sword, keys = m["sword"], m["keys"]        # 块 id（meta 角色→块 id）
+    out = {}
+    for name, g in (("X1", [sword] + keys), ("Y1", keys + [sword])):
+        _t, final = decode(g, start, zone, step, cache=cache)
+        out[name] = fitness(final, h["roster_fit"], h["big"], h["zone_fids"], w_potion=1.5, w_key=39.0)
+    return out
+
+
+@pytest.mark.slow
+def test_sword_early_16826_sentinel(sword_order_fits):
+    """★生死线：无盾剑早(X1)严格优于剑晚(Y1)、Δ＝+16826.0（§S20/S21 块版铁证·兼块边界漂移哨兵）。"""
+    delta = sword_order_fits["X1"] - sword_order_fits["Y1"]
+    assert delta > 0, f"剑早(X1)应严格优于剑晚(Y1)，实得 Δ={delta:+.1f}"
+    assert abs(delta - 16826.0) < 1e-6, \
+        f"★块边界漂移哨兵：剑早−剑晚应＝+16826.0，实得 {delta:+.1f}（剑/钥块或误并入别块）"
