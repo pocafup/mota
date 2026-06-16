@@ -441,6 +441,55 @@
 
 ---
 
+### §S26 ★红钥末腿头部精英 + 判断4 砍钥块【实现完成 + 短跑活体验证·已 commit】（2026-06-15）
+
+> 接 §S25（玩家评估完拍板）：判断3（红钥硬目标·方案c 强制末腿）+ 判断4（全舍纯钥块）已**落地产品码 + launcher 接线 + 单测 + 短跑活体验证 + commit**。★标定反预期（薄态够不到红钥·失败烧满 max_pops）→ 方案升级为【头部精英末腿】（每代只 base-fitness 前 elitek 条跑红钥末腿·与 pop 无关→过夜放大 pop 末腿不爆炸）。**"可行性存疑"已澄清：是【扎实度门槛】非【不可达】——末腿契约测证 689 式扎实态够得到（见下）。**
+
+#### ★方案升级：头部精英末腿（标定反预期 → 玩家方案甲）
+- **标定反预期（重大）**：§S24 最强基因终态(ATK26 DEF25 HP184@MT5(1,8)·**薄**)navigate_to 红钥 `('MT8',9,1)`，**max_pops 2000~16000 全 reached=False·失败烧满 pop 预算**（30s@2k / 118s@8k / 228s@16k·≈14ms/pop）。若【全员】每代跑末腿 → 过夜被烧满预算拖死。
+- **★可行性已澄清（解除"存疑"）**：标定的"够不到"是【薄态(HP184·位置 MT5(1,8))】；末腿契约测 `test_redleg_reach_from_solid_689` 证【扎实态】s689(HP689/ATK26/DEF25·过 boss 路线终态)navigate_to 红钥【**够得到**】(reached_final=True·navigated=1·红钥进包)。→ **同属性(26/25)不同扎实度(HP184 vs 689)够不到/够得到**，正是 §S26 命门（玩家游戏知识定：够不够看【整个状态扎实度】非属性数字）。**红钥可达·门槛是状态扎实度(HP+位置)·非属性数字。** 判断3 作牵引有效：GA 朝扎实态爬、够到即触发 B。
+- **方案甲 = 头部精英**：每代 base fitness 排序后，**只前 elitek=3 条**跑红钥末腿（薄基因失败烧满预算·限只 3 条→过夜可控·与 pop 无关）。`elite_cache` 跨代不重烧（top-k 收敛后基本全缓存命中）。`redcap=8000` = 薄态烧满约 118s 的护栏（暂定·首个 reach 后据实测调）。
+
+#### 实现（产品码 + run_ga 钩子 + launcher + 测·全 commit）
+**【extract/ga_loop.py】**
+1. `_decode_with_order`：加 `final_goal/final_markers/final_max_pops` 三参 + 红钥末腿段（主循环后追加一腿 navigate_to 红钥块·禁区空；失败=原子空操作 state 原样不判 invalid；末腿后走 `track`=基因∪{红钥块} 重算 `newly/side/normalized` 保序列严格；`reached_final`=终态红钥 marker 是否被吸·直查最稳）。`final_goal=None` 字节零回归（仅 verdict 多 `reached_final=False` 键·无害）。
+2. `make_decode_fitness_eval`：加 `final_goal/final_markers/final_max_pops/bonus_b` 四参；`reached_final` 真→`base+bonus_b`（**wrapper 加·非 fitness 本体·守 κ=1：B 是"红钥已在手"的已兑现价值非潜力**）；invalid→`_invalid_score`。默认 `bonus_b=0+final_goal=None` 字节零回归。
+3. `build_min_pool`：判断4 砍纯钥块·`pool=[剑块,盾块]+宝石块`（7→4）；`meta["keys"]` 仍留（+16826 哨兵用 meta 拼基因走封板 decode·不靠 pool→哨兵零改自守）。
+4. `build_harness`：涌现 `red_block/red_markers`（从 `detect_key_targets` colors 全集取 redKey 色折块·非手写坐标）。实测 `red_block=('MT8',(9,1))  red_markers={('MT8',10,2)}`。
+5. `run_ga`：加 `elite_eval_fn/elite_k`（**塔无关**两阶段精英钩子）——base 排序 → 前 elitek 条跑 `elite_eval_fn`（末腿+B）、其余取 base → eff 分数流入 history/selection/log。`elite_cache` 跨代不重烧。默认 `elite_eval_fn=None/elite_k=0` 字节零回归。
+
+**【analysis/ga_overnight_34.py launcher】**：判断4 滤 34→**13**（assert 13·`red_block` 不在 pool）；`base_eval` + `elite_eval`（共享 `decode_cache`·elite_eval 带 final_goal/redcap/bonusb）接 run_ga（`elite_eval_fn=elite_logged/elite_k=elitek`）；`--elitek 3 --redcap 8000 --bonusb 500` 旗标；`dump_best` 末腿重算显红钥 miss/reach + base/+B/eff；on_gen 日志 红钥✓/✗ + redleg 计数。
+
+**【测·270 非slow + 4 slow】**：`test_ga_loop.py` +5 塔无关（字节零回归 / 点火只前 k / miss noop / reach 流 B 单调 / 只评估 top-k）；`test_ga_redleg_contract.py` +4 @slow（**薄态 start→末腿原子空操作终态不变·非 invalid / 689 扎实态→reach+reached_final+navigated≥1+红钥进包 / reach 恰好 +B / miss 不加 B**）。
+
+#### 短跑活体验证（pop8/gen3·15.6min·exit 0·机制全对）
+- **①头部精英点火对**：redleg 只在 base 前 3 名点火（gen0 redleg=3·累计 4·与 pop 无关→过夜放大 pop 末腿不爆炸）。
+- **②原子空操作活体验证**：每条末腿 miss→`eff_fit==base`（redleg#1 eff=-4732=base·#2 eff=-5180=base）·终态不变·B 没加。**契约测的 miss 半在真实 start 态坐实。**
+- **③成本主体是 base 非末腿**：gen0 8.6min 主体是 base 冷算长基因（len13=87s·len4=143s·len5=202s·decode 固有成本）；末腿自身只 redleg#1 烧 54s（薄·慢失败）、#2-4 全 0s（`elite_cache` 跨代摊薄）·**redcap=8000 没打满**（54s<118s）。
+- **红钥=✗ 每代（符合预期·非失望）**：pop8/gen3 基因全弱/短（最优=剑种子 len1·HP754/20/10），没达 689 扎实态→末腿正确够不到→原子空操作。短跑只为验耗时不为出解。
+
+#### 北极星两层口径（§S14·B 隔开两层）
+- **reached 层**（终态红钥到手）：层内比 `base fitness`（≈HP/属性·RP 剩血潜力轴）、整体 +B 抬到 failed 层之上。
+- **failed 层**（够不到红钥）：层内比 `base fitness` 属性梯度（攻防越高越接近能拿红钥）、GA 朝攒攻防爬。
+- B=500 中等量级：大到隔开两层、小到 reached 层仍能跟 fitness(689)=-725 比（守过渡基线对照尺）。
+
+#### ★过夜目标摆正（防睡醒误判·重要）
+- **红钥很可能仍 ✗（够不到）**：§S24 pop40 跑出的最强才 184/26/25（薄·HP184）·够不到红钥（要 689 式扎实态）。这次 GA 可能又只攒到 184 那种、红钥仍 ✗、reached 层恒空、B 不触发。
+- **★这不该叫"失望"**：这次目标不是"立刻够到红钥"，是【看 GA 往红钥(扎实态)爬得怎么样】。红钥末腿是给 GA 往更扎实(更高 HP+攻防+好位置)爬的牵引、base 属性梯度本就指向攒更多、红钥是终极目标。
+- **★成功标准 = GA 最优解的 HP/属性比 §S24 的 184/26/25【更扎实了吗】**（HP 涨?属性涨?往 689 那种状态靠了吗?）·非"够到红钥"。**睡醒看"比 §S24 更扎实没(往红钥爬没)"·不是看"够到红钥没"·别误判失望。**
+
+#### 过夜配置（玩家认可·gen 设大·玩家自起手动停）
+- `python -u analysis/ga_overnight_34.py --tag A --pop 40 --immig 6 --mut 2 --minlen 10 --maxlen 18 --elitek 3 --redcap 8000 --bonusb 500 --gen 50 --persistent`
+- pop40 / 抗早熟(immig6 mut2 长基因 10-18) / elitek3 redcap8000 B500 / **gen 设大(50·让它一直爬·玩家起床手动停取截止最优解·不怕跑超/跑不完·别精确设 gen12)** / `python -u` 写日志 + 每代落盘最优解防丢。两机不同 `--tag/--seed` 不互踩。
+
+#### 零回归 + 封板件
+- **非 slow 270 passed, 9 deselected**（字节零回归路径 `final_goal=None/elite_k=0`）；**末腿契约 4 slow passed**。1 既存无关 warning（test_data_mt1 return list）。
+- **封板件 fitness/decode/navigate_to/detect 零改**（红钥末腿是 `_decode_with_order` 加可选 final_goal 段·decode 主逻辑/navigate_to/detect/fitness 一字未改）、beam 零影响。
+- **标定证据（redcap 依据·保留）**：薄态(§S24 184) navigate_to 红钥 max_pops 2k~16k 全 reached=False·烧满 14ms/pop(8k=118s/16k=228s)；弱英雄(ATK11)从 MT1(7,3) 全 1.8s 快失败（前沿小·不烧满）。→ redcap=8000=薄态烧满约 118s 护栏·头部精英限 3 条→过夜可控。
+- **诊断脚本**（analysis/·非产品码·untracked·可单独提）：`ga_redleg_calibrate.py`（标定 max_pops·内嵌 `STRONG_GENE_S24`）/ `ga_pool_keyblock_audit.py`（判断4 审计）/ `ga_navigate_keyfetch_linchpin.py`（命门 replay·下个 session 诊断红钥门槛可复用）。
+
+---
+
 ## 🎯🎯🎯🎯🎯 下个会话主攻【2026-06-12·钥匙价值【已落地+阶段1实测完】→ 下个 session 做 Stage-2（红钥过 boss·γ+β_big 组合）·取代下方所有旧🎯】
 
 > **⚠ 2026-06-14 更新(§S13 拆墙✅已完成·commit 6c1de0f)·已被取代**：拆成本墙(持久化cache·63×·231绿)已完成 → 下个 session 主攻=【路线图②上规模跑一区好解(追平/超689·拉tok788三方对照)·跑前先 `--persistent` 暖桶】，**非本段红钥过 boss**。红钥长臂仍降级为"一区站稳后(§S13 路线图③)"。本段红钥/钥匙价值/剑盾破谷结论仍有效、留作③阶段输入，勿当下个 session 主攻。
@@ -448,6 +497,8 @@
 > **⚠ 2026-06-15 更新(路线图②首次上规模跑✅·见 §S23)·再取代**：首次上规模跑(pop15/gen10·健康爬坡 −4645→−1002·含盾涌现·基因==normalized 序列严格有效·route 拿剑确认·逼近 689)已完成 → **下个 session 主攻=【扩 pool 跑长基因(len10-15)·见 §S23 四步流程：dump 全候选块给玩家圈定 → 测长基因禁区无效率 → 定配置 → 跑一夜训练】**。三个坑(扩 pool 无效率↑ / 爬不动则限长或注长种子 / 别一夜全烧 navigate_to 冷算)见 §S23。机制澄清(记牢)：GA 不给块预设权重、人圈候选缩搜索空间、机器靠 fitness 搜组合。
 
 > **⚠ 2026-06-15 更新(扩 pool 跑长基因·过夜两机✅·见 §S24)·再再取代**：扩 pool 到 34 块、A 长基因(pop40/limit10-18/immig6)+B 短基因(pop20/maxlen8)两机跑一夜完成(A gen1 -1566/15块·B -968·都到过 MT9·早熟三旋钮+minlen 实战有效) → **下个 session 主攻=【§S25 升级 fitness 标尺·先评估别实现：判断3 红钥硬目标 + 判断4 全舍纯钥块】**。★坐实命门=navigate_to 会不会自己绕去拿开门钥(全舍纯钥块的地基·实测别靠记忆)。详见 §S25。**最深层不是判断基准(A/B 都到过 MT9·A 到了又回来)；基准是 fitness + 实际拿到的属性/块。**
+
+> **⚠ 2026-06-15 更新(§S26 红钥末腿头部精英 + 判断4 砍钥块✅实现完成+短跑验证+commit)·再再再取代**：判断3 红钥末腿(**头部精英·方案甲**) + 判断4 砍钥块已**落地产品码 + launcher + 单测 + 短跑活体验证 + commit**（非 slow **270 绿** + 末腿契约 **4 slow 绿**·封板件零改·beam 零影响）。**★标定"薄态(§S24 184) 够不到红钥"已澄清=【扎实度门槛】非不可达：末腿契约测证 689 式扎实态(HP689/26/25)够得到(navigated=1)→ 同属性不同扎实度够不到/够得到，正是 §S26 命门。** 头部精英=每代只 base 前 elitek=3 条跑末腿(薄基因失败烧满预算·限 3 条→过夜可控·与 pop 无关)。→ **玩家 clear 各机启过夜**（pop40/immig6 mut2/长基因10-18/elitek3 redcap8000 B500/gen 大手动停）。**★过夜目标=看 GA 往扎实态(HP+攻防+好位置)爬得怎么样·非看够到红钥**（红钥很可能仍✗·§S24 最强才 184/26/25 薄态够不到）；睡醒看最优解比 §S24 的 184/26/25 更扎实没·别误判失望。详见 §S26。
 
 > **本 session 成果**：把上节"读码地基"的方案【落地+阶段1 rigorous 实测】完。`extract/door_value.py`（门锚定全臂梯度 door_pull）+ `tests/test_door_value_guard.py`（**13 条 κ=1 守卫·6 命门全过**）+ 接线 `probe_crossfloor_beam.py --gamma-door/--door-win` + 分析器 `extract/analyze_door_open.py`（**重放真引擎逐态核对门开/pocket 吸，不靠观察推断**）。**全 pytest 142 过、零回归**（γ=0 字节零回归守卫钉死）。**⚠ 全部未 commit（见末尾状态）。**
 

@@ -427,3 +427,78 @@ def test_levers_reproducible():
     assert a.gen_best_fitness == b.gen_best_fitness
     assert a.best_individual == b.best_individual
     assert a.n_unique_evals == b.n_unique_evals
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# §S26 头部精英末腿钩子 elite_eval_fn/elite_k（塔无关·合成 eval 验机器；真红钥末腿契约见 @slow 测）
+# 机器铁律：默认关=字节零回归；开启只对 top-elite_k 跑第二评估·跨代缓存·有效分流入 history/选择/log
+# ════════════════════════════════════════════════════════════════════════════════
+
+def test_elite_hook_default_off_byte_identical():
+    """elite_eval_fn=None/elite_k=0 与完全不传 → 逐字节零回归（默认关）。"""
+    ev = _ordered_target_eval(list(POOL))
+    a = run_ga(POOL, ev, population=16, generations=15, crossover_rate=0.5, seed=2024)
+    b = run_ga(POOL, ev, population=16, generations=15, crossover_rate=0.5, seed=2024,
+               elite_eval_fn=None, elite_k=0)
+    assert a.gen_best_fitness == b.gen_best_fitness
+    assert a.best_individual == b.best_individual
+    assert a.n_unique_evals == b.n_unique_evals
+    assert [g for _, g in a.gen_history[-1]] == [g for _, g in b.gen_history[-1]]
+
+
+def test_elite_hook_partial_config_is_off():
+    """只给 elite_eval_fn 不给 elite_k（或反之）→ 仍关（两者都需 → 防误触发跑贵末腿）。"""
+    ev = _ordered_target_eval(list(POOL))
+    big = lambda g: ev(g) + 100000
+    base = run_ga(POOL, ev, population=16, generations=12, seed=2024)
+    only_fn = run_ga(POOL, ev, population=16, generations=12, seed=2024, elite_eval_fn=big)
+    only_k = run_ga(POOL, ev, population=16, generations=12, seed=2024, elite_k=3)
+    for r in (only_fn, only_k):
+        assert r.gen_best_fitness == base.gen_best_fitness
+        assert r.best_individual == base.best_individual
+        assert r.n_unique_evals == base.n_unique_evals
+
+
+def test_elite_hook_miss_is_noop_on_trajectory():
+    """elite_eval_fn 原样返回 base（miss·原子空操作类比）→ 选择轨迹与关闭时逐字节同。
+    坐实：末腿 miss 不改种群演化，只有 reach（带 B）才扰动。"""
+    ev = _ordered_target_eval(list(POOL))
+    base = run_ga(POOL, ev, population=20, generations=12, elite=2, seed=20260613)
+    miss = run_ga(POOL, ev, population=20, generations=12, elite=2, seed=20260613,
+                  elite_eval_fn=lambda g: ev(g), elite_k=3)
+    assert miss.gen_best_fitness == base.gen_best_fitness
+    assert miss.best_individual == base.best_individual
+    assert miss.n_unique_evals == base.n_unique_evals
+    assert [g for _, g in miss.gen_history[-1]] == [g for _, g in base.gen_history[-1]]
+
+
+def test_elite_hook_bonus_promotes_and_flows():
+    """头部「reach」基因（合成命门=头位命中 target[0]·正是高 base 那批）带 +B → 霸占最优、有效分入 history。
+    base fit_cache 不计末腿评估（n_unique_evals 仍只数 base）。"""
+    target = list(POOL)
+    ev = _ordered_target_eval(target)
+    B = 100000
+    def elite_ev(g):                                 # reach = 头位命中 target[0]（高 base 基因特征）
+        return ev(g) + B if (g and g[0] == target[0]) else ev(g)
+    res = run_ga(POOL, ev, population=20, generations=20, elite=2,
+                 elite_eval_fn=elite_ev, elite_k=3, seed=20260613)
+    assert res.gen_best_fitness[-1] >= B             # 末代最优带 B → 确反映末腿奖励
+    assert res.best_individual[0] == target[0]       # 最优个体确是「reach」那类
+    assert _is_valid_subset(res.best_individual, POOL)
+    gb = res.gen_best_fitness
+    assert all(gb[i + 1] >= gb[i] for i in range(len(gb) - 1)), gb  # 精英保留 → 单调不降
+
+
+def test_elite_hook_evaluates_only_top_k():
+    """末腿评估次数被 top-elite_k 框住 + 跨代缓存去重 → 远少于 pop·gens（贵末腿不全员烧）。"""
+    target = list(POOL)
+    ev = _ordered_target_eval(target)
+    calls = {"n": 0}
+    def elite_ev(g):
+        calls["n"] += 1
+        return ev(g)
+    pop, gens, k = 20, 10, 3
+    run_ga(POOL, ev, population=pop, generations=gens, elite=2,
+           elite_eval_fn=elite_ev, elite_k=k, seed=20260613)
+    assert calls["n"] <= k * gens                    # 每代至多 k 条冷算
+    assert calls["n"] < pop * gens                   # 远少于全员评估

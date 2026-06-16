@@ -1,6 +1,15 @@
-"""【§S23 步3-5·过夜大跑 launcher（A/B 双机参数化）】34 块候选 pool 上跑 GA，配成「玩家起床手动
-Ctrl-C 停、停时已跑代数都有效、截止最优解可导出」。不碰 build_min_pool（产品涌现红线）——34 块 pool
-在本脚本内就地重建（复刻已被玩家拍过的统一判据·assert 34），喂给现成 run_ga。
+"""【§S23 步3-5 / §S26·过夜大跑 launcher（A/B 双机参数化）】候选 pool 上跑 GA，配成「玩家起床手动
+Ctrl-C 停、停时已跑代数都有效、截止最优解可导出」。不碰 build_min_pool（产品涌现红线）——pool 在本脚本内
+就地重建（复刻已被玩家拍过的统一判据），喂给现成 run_ga。
+
+★§S26 红钥末腿头部精英（判断3 方案c + 判断4·2026-06-15 玩家用游戏知识定的新方法）：
+  · 判断4 砍纯钥块：pool 从 34（含钥）缩到【13】（剑/盾/宝石块）——navigate_to 命门坐实自绕拿开门钥，
+    钥匙不占 GA 维度（与 build_min_pool 同口径）。红钥块单独抽成 eval 层【强制末腿】（不进 pool）。
+  · 红钥末腿只让【头部够扎实】的基因跑（base fitness 前 elitek=3 条）：§S26 标定坐实「ATK26 够不到红钥是
+    基因不扎实(HP薄/位置差)非属性不够」→ 全员跑会被弱基因拖死（贵·~118s/条）。run_ga 两阶段精英钩子
+    （elite_eval_fn/elite_k·塔无关）实现；跑过的基因跨代缓存不重烧。reach→base+B（北极星二段奖励·够到
+    boss 的已兑现价值·κ=1 在 wrapper 加非 fitness 本体）；miss→原子空操作（终态不变·不判 invalid·早代弱
+    基因留属性梯度防早熟塌缩）。封板件 fitness/decode/navigate_to/detect 一字不改、beam 零影响。
 
 ★§S23 步5 两机分工（玩家 2026-06-15 拍板·治昨晚 34 块 gen2 塌的早熟）：
   · 机器A=长基因/大 pop 治早熟（看大 pop 修早熟后长基因能否搜出比白天 7 块 -1002 更深的解）；
@@ -19,10 +28,12 @@ Ctrl-C 停、停时已跑代数都有效、截止最优解可导出」。不碰 
     进包序 normalized/三方对照 fitness(689)(718)/解码终态(含 tokens)。Ctrl-C 干净停（最新一代已落盘）。
   · --persistent 暖桶：34 块深目标首跑冷算慢（前几代尤其慢）、无妨、逐代可见。
 
-跑法（两机各一条·见 §S23 步5 方案）：
+跑法（红钥末腿默认开·elitek=3/redcap=8000/B=500；--elitek 0 关回纯 base 模式）：
+  短跑验耗时(过夜前必做): python -u analysis/ga_overnight_34.py --tag T --pop 8 --gen 3 --persistent
   机器A: python -u analysis/ga_overnight_34.py --tag A --pop 40 --gen 200 --mut 2 --immig 6 --cross 0.6 --seed 20260615 --persistent
   机器B: python -u analysis/ga_overnight_34.py --tag B --pop 20 --gen 300 --maxlen 8 --immig 3 --cross 0.6 --seed 20260616 --persistent
-红线：大 gen 玩家停、逐代日志可见、每代落盘防丢、persistent、不改 build_min_pool、早熟修法只动 GA 超参。
+红线：大 gen 玩家停、逐代日志可见、每代落盘防丢、persistent、不改 build_min_pool、早熟修法只动 GA 超参；
+  红钥末腿只头部跑(非全员)、reach→base+B/miss→原子空操作、redcap=8000 暂定监控「扎实基因却 miss」=可能太小。
 """
 import argparse
 import os
@@ -55,6 +66,9 @@ def _parse_args():
     p.add_argument("--minlen", type=int, default=None, help="基因长度下限（机器A 长基因区间·缺省=不限）")
     p.add_argument("--elite", type=int, default=2, help="精英保留数")
     p.add_argument("--k", type=int, default=3, help="锦标赛 k")
+    p.add_argument("--elitek", type=int, default=3, help="§S26 头部精英末腿：每代取 base fitness 前 elitek 条跑红钥末腿（0=关·零回归）")
+    p.add_argument("--redcap", type=int, default=8000, help="§S26 红钥末腿专用 navigate_to 弹出护栏 final_max_pops（暂定·首个 reach 后据实测调）")
+    p.add_argument("--bonusb", type=float, default=500.0, help="§S26 北极星二段奖励 B：终态红钥到手整体 +B（中等量级·保对 fitness(689) 尺）")
     p.add_argument("--seed", type=int, default=20260613, help="随机种子（两机用不同 seed 探不同区域）")
     p.add_argument("--persistent", action="store_true", help="navigate_to 跨 run 持久暖桶")
     return p.parse_args()
@@ -87,6 +101,7 @@ def main():
     start, zone, step = H["start"], H["zone"], H["step"]
     roster_fit, big, zone_fids = H["roster_fit"], H["big"], H["zone_fids"]
     decode_cache = H["decode_cache"]
+    red_block, red_markers = H["red_block"], H["red_markers"]     # §S25 判断3 红钥末腿（电池组涌现·非手写）
     log_line(f"  电池组就绪 {time.time() - t0:.1f}s")
 
     # ── 34 块候选 pool 就地重建（复刻统一判据·不碰 build_min_pool）──
@@ -99,9 +114,11 @@ def main():
 
     cand_gems = sorted(c for c, br in gem_tri.items()
                        if br == "②" and c not in big_cells and drp_by_cell.get(c, 0) > 0)
-    cand_keys = sorted(cands)
+    cand_keys = sorted(cands)            # 仅留作 role 标注/诊断（判断4 后不进 pool）
     cand_keys_set = set(cand_keys)
-    cand_cells = set(sorted(big_cells)) | set(cand_gems) | set(cand_keys)
+    # ★判断4（§S25·与 build_min_pool 同口径）：纯钥块全舍——navigate_to 命门坐实自绕拿开门钥（顺路自拿）。
+    #   钥块不占 GA 维度 → pool 从 34（含钥）缩到 13（剑/盾/宝石块）。红钥块单独抽成 eval 层末腿目标（不进 pool）。
+    cand_cells = set(sorted(big_cells)) | set(cand_gems)
 
     fids = sorted(set(zone_fids) | {c[0] for c in cand_cells})
     block_index = build_block_index(fids)
@@ -113,7 +130,9 @@ def main():
     block_markers = {b: frozenset(cs) for b, cs in block_markers.items()}
     pool = sorted(block_markers, key=lambda b: (b[0], b[1]))
     block_cells = {b: block_index["block_cells"][b] for b in pool}
-    assert len(pool) == 34, f"pool 块数 {len(pool)} ≠ 34（判据/数据漂移·须核对再跑）"
+    assert len(pool) == 13, f"pool 块数 {len(pool)} ≠ 13（判断4 砍钥后·判据/数据漂移·须核对再跑）"
+    assert red_block is not None and red_block not in pool, \
+        f"红钥块须涌现且【不在 pool】(判断4 抽成末腿)·red_block={red_block} in_pool={red_block in pool}"
 
     sword_c = next(c for (_d, c, da, _dd) in ranked if c in big_cells and da > 0)
     shield_c = next(c for (_d, c, _da, dd) in ranked if c in big_cells and dd > 0)
@@ -132,10 +151,18 @@ def main():
                 parts.append("宝攻" if da > 0 else "宝防")
         return "+".join(parts) or "?"
 
-    # ── eval_fn（34 pool·禁区开·复用持久暖桶）+ 三方对照基线 ──
-    eval_fn, _dc = make_decode_fitness_eval(
+    # ── 两 eval_fn（13 pool·禁区开·共享持久暖桶）：base=评全种群(无末腿)；elite=只评头部(红钥末腿+北极星B)──
+    base_eval, _dc = make_decode_fitness_eval(
         start, zone, step, roster_fit, big, zone_fids,
         decode_cache=decode_cache, block_markers=block_markers, block_cells=block_cells)
+    redleg_on = args.elitek > 0 and red_block is not None
+    elite_eval = None
+    if redleg_on:
+        elite_eval, _ = make_decode_fitness_eval(           # ★§S26 红钥末腿版：final_goal/markers/cap + 北极星 B（共享 decode_cache 暖桶）
+            start, zone, step, roster_fit, big, zone_fids,
+            decode_cache=decode_cache, block_markers=block_markers, block_cells=block_cells,
+            final_goal=red_block, final_markers=red_markers,
+            final_max_pops=args.redcap, bonus_b=args.bonusb)
     f689 = fitness(H["s689"], roster_fit, big, zone_fids, w_potion=1.5, w_key=39.0)
     f718 = fitness(H["s718"], roster_fit, big, zone_fids, w_potion=1.5, w_key=39.0)
 
@@ -145,10 +172,13 @@ def main():
     minlen_str = "不限" if args.minlen is None else str(args.minlen)
     log_line("")
     log_line("=" * 70)
-    log_line(f"机器 tag={args.tag or '(无)'}  pool=34 块  pop={population}  gen={generations}  "
+    log_line(f"机器 tag={args.tag or '(无)'}  pool={len(pool)} 块(判断4砍钥·原34)  pop={population}  gen={generations}  "
              f"交叉={args.cross}  精英{args.elite}  k{args.k}  seed={args.seed}")
     log_line(f"  早熟旋钮: 长度区间=[{minlen_str}..{maxlen_str}]  mut/child={args.mut}  随机移民={args.immig}/代  "
              f"(默认 1/0/不限=原版·>则抗早熟·注入种子不受下限约束)")
+    log_line(f"  红钥末腿(§S26 头部精英): {'开' if redleg_on else '关'}  elitek={args.elitek}  redcap={args.redcap}  "
+             f"B={args.bonusb:.0f}  红钥块={red_block} 判据={set(red_markers) if red_markers else None}")
+    log_line(f"    (头部 base 前 elitek 条跑红钥末腿·reach→base+B / miss→原子空操作终态不变·跨代缓存不重烧)")
     log_line(f"  剑块={sword_block}[{role_of(sword_block)}]  盾块={shield_block}[{role_of(shield_block)}]")
     log_line(f"  注种子: {[ [role_of(b) for b in s] for s in seeds ]}")
     log_line(f"  三方对照基线: fitness(689)={f689:.1f}  fitness(718)={f718:.1f}  (白天7块GA到 -1002)")
@@ -161,26 +191,45 @@ def main():
 
     def eval_logged(gene):
         t = time.time()
-        f = eval_fn(gene)
+        f = base_eval(gene)
         eval_count[0] += 1
         log_line(f"    eval#{eval_count[0]:4d}  len={len(gene):2d}  fit={f:14.1f}  {time.time() - t:5.0f}s")
         return f
 
+    redleg_count = [0]
+
+    def elite_logged(gene):                          # ★头部精英末腿评估（贵·~118s/条·只 top-elitek 跑·跨代缓存去重）
+        t = time.time()
+        f = elite_eval(gene)
+        redleg_count[0] += 1
+        log_line(f"    ★redleg#{redleg_count[0]:3d} len={len(gene):2d}  eff_fit={f:14.1f}  {time.time() - t:5.0f}s  (头部红钥末腿)")
+        return f
+
     # ── 最优解原子落盘（防 Ctrl-C 丢）──
     def dump_best(gen, gene, fit, tag=""):
+        fg = red_block if redleg_on else None
         tokens, final, normalized, verdict = _decode_with_order(
             gene, start, zone, step, decode_cache,
-            block_markers=block_markers, block_cells=block_cells)
+            block_markers=block_markers, block_cells=block_cells,
+            final_goal=fg, final_markers=(red_markers if redleg_on else None),
+            final_max_pops=(args.redcap if redleg_on else None))
         fh = final.hero
+        reached_red = verdict.get("reached_final", False)
+        base_fit = fitness(final, roster_fit, big, zone_fids, w_potion=1.5, w_key=39.0)
+        b_shown = args.bonusb if reached_red else 0.0
         shield_in = shield_block in gene
         sword_in = sword_block in gene
         shield_got = _taken(final, shield_c)
         sword_got = _taken(final, sword_c)
         sword_norm = (normalized.index(sword_block) + 1) if sword_block in normalized else None
+        red_line = ((f"红钥末腿 = {'reach✓ 红钥到手(终态)' if reached_red else 'miss✗ 够不到(原子空操作·终态不变)'}   "
+                     f"base={base_fit:.1f}  +B={b_shown:.0f}  eff={fit:.1f}")
+                    if redleg_on else "红钥末腿 = 关(base 模式)")
         lines = [
             f"截止最优解  gen={gen}{('  ['+tag+']') if tag else ''}  {datetime.now():%Y-%m-%d %H:%M:%S}",
-            f"最优 fitness = {fit:.1f}   (对照 fitness(689)={f689:.1f} 差={fit - f689:+.1f}  "
-            f"fitness(718)={f718:.1f} 差={fit - f718:+.1f})",
+            f"最优 fitness = {fit:.1f}   (对照 fitness(689)={f689:.1f} 差={base_fit - f689:+.1f}(base)  "
+            f"fitness(718)={f718:.1f} 差={base_fit - f718:+.1f}(base))",
+            red_line,
             f"序列有效 = {'是' if not verdict['invalid'] else '否(全种群无可实现排序?)'}   "
             f"导航腿={verdict['navigated']}  最深层下标={verdict['depth']}",
             f"含盾(在基因) = {'是' if shield_in else '否'}    盾实际进包(终态) = {'是' if shield_got else '否'}",
@@ -205,17 +254,20 @@ def main():
         with open(tmp, "w", encoding="utf-8") as f:
             f.write("\n".join(lines) + "\n")
         os.replace(tmp, BEST)
+        return reached_red
 
     # ── 逐代回调：落盘最优 + 写摘要 ──
     t_run = time.time()
 
     def on_gen(gl):
         contains_shield = shield_block in gl.best_individual
-        dump_best(gl.gen, gl.best_individual, gl.best_fitness)
+        reached_red = dump_best(gl.gen, gl.best_individual, gl.best_fitness)
         elapsed = time.time() - t_run
+        red_tag = (f"  红钥={'✓' if reached_red else '✗'}" if redleg_on else "")
         log_line(f"━━ gen {gl.gen:3d}  best={gl.best_fitness:14.1f}  len={len(gl.best_individual):2d}  "
-                 f"含盾={'Y' if contains_shield else 'N'}  无效个体={gl.n_invalid:2d}  "
-                 f"uniq_evals={gl.n_unique_evals:4d}  spread=[{gl.spread_lo:.0f}..{gl.spread_hi:.0f}]  "
+                 f"含盾={'Y' if contains_shield else 'N'}{red_tag}  无效个体={gl.n_invalid:2d}  "
+                 f"uniq_evals={gl.n_unique_evals:4d}  redleg={redleg_count[0]}  "
+                 f"spread=[{gl.spread_lo:.0f}..{gl.spread_hi:.0f}]  "
                  f"累计{elapsed / 60:.1f}min  → 已落盘最优解")
 
     log_line(f"开跑 run_ga（gen0 冷算约 {population} 条·首条≈深目标冷算·稍候即见 eval#1）…")
@@ -224,17 +276,19 @@ def main():
                      tournament_k=args.k, elite=args.elite, crossover_rate=args.cross,
                      inject=seeds, seed=args.seed, log=on_gen,
                      max_len=args.maxlen, min_len=args.minlen, mutations_per_child=args.mut,
-                     random_immigrants=args.immig)
+                     random_immigrants=args.immig,
+                     elite_eval_fn=(elite_logged if redleg_on else None),
+                     elite_k=(args.elitek if redleg_on else 0))
         log_line("")
         log_line(f"=== run_ga 跑完 gen{generations}（已收敛或代数用尽）===")
         dump_best(generations - 1, res.best_individual, res.best_fitness, tag="FINAL-跑完")
         log_line(f"全程最优 fitness={res.best_fitness:.1f}  uniq_evals={res.n_unique_evals}  "
-                 f"总耗时{(time.time() - t_run) / 60:.1f}min")
+                 f"base_eval={eval_count[0]}  redleg={redleg_count[0]}  总耗时{(time.time() - t_run) / 60:.1f}min")
     except KeyboardInterrupt:
         log_line("")
         log_line(f"=== Ctrl-C 玩家手动停 {datetime.now():%Y-%m-%d %H:%M:%S} ===")
         log_line(f"  截止最优解已落盘（最新一代）→ {BEST}")
-        log_line(f"  累计耗时 {(time.time() - t_run) / 60:.1f}min  共 eval {eval_count[0]} 次")
+        log_line(f"  累计耗时 {(time.time() - t_run) / 60:.1f}min  共 base_eval {eval_count[0]} 次  redleg {redleg_count[0]} 次")
     finally:
         if hasattr(decode_cache, "stats"):
             log_line(f"  navigate_to 暖桶: 桶={decode_cache.version_tag}  {decode_cache.stats}")

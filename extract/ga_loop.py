@@ -152,7 +152,8 @@ class GenLog:
 
 def run_ga(pool, eval_fn, *, population=12, generations=6, tournament_k=3,
            elite=2, crossover_rate=0.0, inject=None, seed=20260613, log=None,
-           max_len=None, mutations_per_child=1, random_immigrants=0, min_len=None):
+           max_len=None, mutations_per_child=1, random_immigrants=0, min_len=None,
+           elite_eval_fn=None, elite_k=0):
     """最小 GA 主循环（见模块头）。pool=目标 cell 列表；eval_fn(gene)->fitness。返回 GAResult。
     fitness 缓存按基因元组去重（同基因不重复评估·decode 贵）。固定 seed 可复现。
     crossover_rate: 0=纯变异(默认·字节级零回归——>0 判定短路、不消耗 rng)；>0 则每个后代以此概率两父 OX 交叉。
@@ -167,7 +168,14 @@ def run_ga(pool, eval_fn, *, population=12, generations=6, tournament_k=3,
                          是【显式给定点】不受 min_len 约束——只有 GA 自生成的基因（随机/变异/交叉/移民）才守区间。
     mutations_per_child: 每个后代连做几次单点变异（>1=更大变异步长·维持多样性抗早熟）。1=原版（恰一次·零回归）。
     random_immigrants:   每代精英之后注入几条全新随机基因（抗种群塌缩·昨晚 gen2 收敛的直接解药）。0=不注入
-                         （零回归——range(0) 不消耗 rng）。注入数被 population 截顶（精英+移民≤population）。"""
+                         （零回归——range(0) 不消耗 rng）。注入数被 population 截顶（精英+移民≤population）。
+    ── §S26 红钥末腿头部精英（均默认关·字节级零回归）──
+    elite_eval_fn:       可选第二评估函数（喂红钥末腿版 eval_fn）。None=不启用（默认·零回归）。
+    elite_k:             每代按 base fitness 排名后，只让 top-elite_k 条用 elite_eval_fn 重评（红钥末腿贵·~118s/条·
+                         只值得头部够扎实的基因跑：§S26 ATK26 够不到是基因不扎实非属性不够→全员跑会被弱基因拖死）。
+                         0=不启用。跑过的基因进【独立 elite_cache】跨代复用（贵·不重烧）；非头部沿用 base 或曾为精英的
+                         缓存末腿分。有效分（reach→base+B / miss→base 原子空操作终态不变）流入 history/选择/log。
+                         ★塔无关：run_ga 不认红钥、只调两个 eval_fn——「跑哪条末腿」由调用方喂的 elite_eval_fn 决定。"""
     if not pool:
         raise ValueError("pool 不能为空")
     rng = random.Random(seed)
@@ -178,6 +186,13 @@ def run_ga(pool, eval_fn, *, population=12, generations=6, tournament_k=3,
         if key not in fit_cache:
             fit_cache[key] = eval_fn(ind)
         return fit_cache[key]
+
+    elite_cache = {}                       # §S26 头部精英末腿：跑过红钥末腿的基因跨代缓存（贵·~118s/条），独立于 base fit_cache
+    def ev_elite(ind):
+        key = tuple(ind)
+        if key not in elite_cache:
+            elite_cache[key] = elite_eval_fn(ind)
+        return elite_cache[key]
 
     pool_set = set(pool)
     seeded = []
@@ -192,7 +207,19 @@ def run_ga(pool, eval_fn, *, population=12, generations=6, tournament_k=3,
     best = (float("-inf"), None)
 
     for g in range(generations):
-        scored = sorted(((ev(ind), ind) for ind in pop), key=lambda fs: -fs[0])
+        base_scored = sorted(((ev(ind), ind) for ind in pop), key=lambda fs: -fs[0])
+        if elite_eval_fn is not None and elite_k > 0:
+            # §S26 头部精英末腿：按 base fitness 排名，只让 top-elite_k 跑红钥末腿（贵），其余沿用 base/已缓存精英分
+            eff = []
+            for rank, (bscore, ind) in enumerate(base_scored):
+                if rank < elite_k:
+                    score = ev_elite(ind)                        # 头部·跑末腿（reach→base+B / miss→base 原子空操作）
+                else:
+                    score = elite_cache.get(tuple(ind), bscore)  # 非头部：曾是精英则复用缓存末腿分，否则 base
+                eff.append((score, ind))
+            scored = sorted(eff, key=lambda fs: -fs[0])
+        else:
+            scored = base_scored                                 # 默认关·字节级零回归
         history.append([(f, list(ind)) for f, ind in scored])
         gbest_fit, gbest_ind = scored[0]
         gen_best.append(gbest_fit)
@@ -252,7 +279,8 @@ def _goal_markers(goal, block_markers):
 
 
 def _decode_with_order(chromosome, start_state, zone, step_fn, cache, *, max_pops=8000,
-                       block_markers=None, block_cells=None):
+                       block_markers=None, block_cells=None,
+                       final_goal=None, final_markers=None, final_max_pops=None):
     """复刻封板 decode 的逐目标 navigate_to 串（decode 一字不改），额外产 normalized_order ＝ 基因目标
     【真正进包的全局先后序】。终态【必与 decode(...) 逐字段一致】（复刻封板 decode·禁区关时字节回封板）。
       进包判定（复刻验证脚本的腿级 _taken）：一腿 navigate_to 前后，某目标的【判据 cell 全部】由「有」变
@@ -265,18 +293,34 @@ def _decode_with_order(chromosome, start_state, zone, step_fn, cache, *, max_pop
       cell（forbidden_after）→ navigate_to 绕禁区走（治跨块顺路吸）；带禁区够不到时【不带禁区重跑一次】区分：
       情况1 不带也够不到（无钥/真不可达）→ 同封板跳过、不淘汰；情况2 不带能到（唯一通路须踏入后续块）→ 此
       排序物理不可实现 → 标 invalid、整条作废（§S15 绝不换序）。None → 禁区关、navigate_to 字节回封板。
+    ── ★§S25 红钥末腿（方案c·判断3·final_goal 给则启用）──
+    final_goal（红钥块 id·【不是可选 pool 元素】抽成固定末腿）：主基因循环跑完后，强制追加【一腿】定向到
+      红钥块。末腿【禁区空·自由找路】（§S21：禁区只对有后续的块有意义、末腿无后续）。失败＝【原子空操作】
+      （state 原样·navigate_to 返回入口态本体）·【不判 invalid】（早代弱基因几乎都够不到红钥，若判无效则
+      早代几乎全废、分数被压平没梯度→早熟塌缩；空操作下终态仍按属性梯度评分，GA 朝「攒够攻防」爬）。
+      ★防末腿破坏序列严格性：末腿走【和主基因同一套真实进包追踪】——track = 基因目标 ∪ {红钥块}，末腿
+      navigate_to 顺路吸到的【未进包基因块】按真实先后记进 normalized、红钥块排其后（不是把红钥拼基因末尾）
+      → 守「基因==normalized 严格有效」不变量。final_markers＝红钥块进包判据 cell（红钥块通常不在 pool 的
+      block_markers 里·故须显式传）；final_max_pops＝末腿专用弹出护栏（None＝同 max_pops·实战须先标定）。
     返回 (tokens, final_state, normalized_order: tuple[目标], verdict)；verdict={"invalid":bool,
-      "navigated":已导航腿数, "depth":最深层下标}——invalid 时供 eval 层算 INVALID_BASE+进度分
+      "navigated":已导航腿数, "depth":最深层下标, "reached_final":红钥末腿是否到手(final_goal=None→False)}——
+      invalid 时供 eval 层算 INVALID_BASE+进度分；reached_final 供 eval 层加北极星奖励 B
       （κ=1：verdict 是 decode 的结构产物、不调 fitness、不反馈任何中途推进）。"""
     targets = list(chromosome)                      # 基因目标（钉死点 1：本就无重复有序）；cell 或块 id
     markers = {g: _goal_markers(g, block_markers) for g in targets}
+    track = list(targets)                           # 进包追踪集（默认＝基因目标·零回归）
+    if final_goal is not None:                      # ★红钥末腿：把红钥块纳入追踪集 + markers（不进 targets·不受禁区/主循环驱动）
+        markers[final_goal] = (tuple(final_markers) if final_markers is not None
+                               else _goal_markers(final_goal, block_markers))
+        if final_goal not in track:
+            track.append(final_goal)
 
     def _is_taken(g, st):
         return all(_taken(st, c) for c in markers[g])   # 块模式=整块物品全吸；cell 模式=该 cell 已空
 
     state = start_state
     tokens = []
-    taken = {g: _is_taken(g, state) for g in targets}   # 已进包的目标（起点一般全 False）
+    taken = {g: _is_taken(g, state) for g in track}     # 已进包的目标（起点一般全 False）·键含红钥块（末腿追踪用）
     normalized = []
     navigated = 0                                       # 成功导航到的腿数（进度分·区分无效序列优劣）
     invalid = False
@@ -299,14 +343,33 @@ def _decode_with_order(chromosome, start_state, zone, step_fn, cache, *, max_pop
             state = final
             tokens.extend(moves)
             navigated += 1
-        newly = [g for g in targets if not taken[g] and _is_taken(g, state)]   # 这一腿新进包（含顺路吸）
+        newly = [g for g in track if not taken[g] and _is_taken(g, state)]   # 这一腿新进包（含顺路吸·track 含红钥块）
         for g in newly:
             taken[g] = True
         side = sorted(g for g in newly if g != goal)   # 顺路吸（非本腿目标）→ 排在 goal 之前·确定性定序
         normalized.extend(side)
         if goal in newly:                              # 本腿目标这一步真拿到 → 排在顺路之后
             normalized.append(goal)
-    verdict = {"invalid": invalid, "navigated": navigated, "depth": _depth_of(state)}
+    # ── ★红钥末腿（§S25 方案c·禁区空自由找路·失败=原子空操作不判无效·跑完按真实进包续 normalized）──
+    if final_goal is not None and not invalid and not state.dead and not state.won:
+        fmp = final_max_pops if final_max_pops is not None else max_pops
+        fstate, fmoves, freached = navigate_to(        # 禁区空（forbidden 默认空集·末腿无后续）
+            state, goal_to_cell(final_goal), zone, step_fn, max_pops=fmp, cache=cache)
+        if freached:                                   # 够到红钥 → 推进态、串入动作（北极星 reached 段）
+            state = fstate
+            tokens.extend(fmoves)
+            navigated += 1
+        # 够不到 → 原子空操作（state 原样）·不判 invalid（早代弱基因留属性梯度·见 docstring）
+        newly = [g for g in track if not taken[g] and _is_taken(g, state)]   # 末腿真实进包（含顺路吸的未进包基因块）
+        for g in newly:
+            taken[g] = True
+        side = sorted(g for g in newly if g != final_goal)   # 顺路吸排红钥之前·红钥末位（守序列严格性）
+        normalized.extend(side)
+        if final_goal in newly:
+            normalized.append(final_goal)
+    reached_final = (final_goal is not None) and _is_taken(final_goal, state)   # 终态红钥已在手（直查 marker 被吸·最稳）
+    verdict = {"invalid": invalid, "navigated": navigated, "depth": _depth_of(state),
+               "reached_final": reached_final}
     return tokens, state, tuple(normalized), verdict
 
 
@@ -321,12 +384,20 @@ def _invalid_score(verdict):
 
 def make_decode_fitness_eval(start, zone, step_fn, roster, big, zone_fids, *,
                              w_potion=1.5, w_key=39.0, decode_cache=None,
-                             block_markers=None, block_cells=None):
+                             block_markers=None, block_cells=None,
+                             final_goal=None, final_markers=None, final_max_pops=None,
+                             bonus_b=0.0):
     """构造 eval_fn(gene)->fitness：复刻 decode（_decode_with_order 串 navigate_to）跑全程 → fitness 终评。
     decode_cache：navigate_to 缓存（GA 内反复导航同几个目标[尤其 26s 盾] → 命中近免费）。
       不传则本函数自建一个、整个 GA 共享 → 同(中途态,目标)只冷算一次。返回 (eval_fn, decode_cache)。
     block_cells（§S15 禁区）：给则 _decode_with_order 每腿带禁区导航；某腿判无效 → eval 直接返 _invalid_score
       （INVALID_BASE+进度分），不调 fitness（run_ga 基因元组缓存已对同基因去重）。None → 禁区关。
+    ── ★§S25 红钥末腿 + 北极星二段奖励 B（判断3 方案c+a）──
+    final_goal / final_markers / final_max_pops：透传 _decode_with_order 的红钥强制末腿（见其 docstring）。
+    bonus_b：reached 段（终态红钥到手＝够到 boss）整体 +bonus_b，抬到 failed 段（够不到红钥）之上。
+      ★B 在【wrapper 加】非 fitness 本体——守 κ=1（B 是终态「红钥已在手」的已兑现价值·非潜力）；B【中等量级】
+      （保住与 fitness(689) 的对照尺：别让分数飞了没法跟 689 比·689 是过 boss 前的过渡基线）。
+      默认 0.0 + final_goal=None → 字节级零回归（reached_final 恒 False·直接返 base·不加 B）。
     去重：靠 run_ga 的基因元组缓存（fit_cache）→ 同基因不重复评估。解码后规整去重已退役（§S21：块为目标灭
       块内假序、禁区把跨块顺路吸判无效 → 不再产生需折叠的等价基因）；_decode_with_order 仍产 normalized_order、
       仅供 dump 诊断显示真实进包序。"""
@@ -336,10 +407,14 @@ def make_decode_fitness_eval(start, zone, step_fn, roster, big, zone_fids, *,
     def eval_fn(gene):
         _tokens, final, _normalized, verdict = _decode_with_order(
             gene, start, zone, step_fn, decode_cache,
-            block_markers=block_markers, block_cells=block_cells)
+            block_markers=block_markers, block_cells=block_cells,
+            final_goal=final_goal, final_markers=final_markers, final_max_pops=final_max_pops)
         if verdict["invalid"]:                       # §S15 序列结构无效 → 整条作废、给可区分差分（不评 fitness）
             return _invalid_score(verdict)
-        return fitness(final, roster, big, zone_fids, w_potion=w_potion, w_key=w_key)
+        base = fitness(final, roster, big, zone_fids, w_potion=w_potion, w_key=w_key)
+        if verdict.get("reached_final"):             # ★北极星 reached 段：红钥到手 → 整体抬 +B（够到 boss）
+            return base + bonus_b
+        return base                                  # failed 段（够不到红钥）：按属性梯度排序·GA 朝攒攻防爬
 
     return eval_fn, decode_cache
 
@@ -357,11 +432,13 @@ def build_min_pool(big_cells, ranked, cands, block_index):
       · MT4 钥  : detect_key_targets ② 候选里的 MT4 六钥【排除深 (9,2)】= 5 把（从 cands 直接筛 → 必是子集）。
       · 小宝石  : ranked 里 MIN_GEMS 三个顺路攻防宝石（assert ∈ ranked 且 ∉ big_cells → 真小宝石）。
     ★块为目标（§S18 步②）：detect 吐的 cell 口径【一字不改】（守 beam 零影响——detect 函数体不动），算出 10
-      个 cell 后经 block_index 折成所属【初始块 id】、保序去重 → pool = 块 id 列表（同块 cell 合并·五钥归并）。
+      个 cell 后经 block_index 折成所属【初始块 id】、保序去重。
+    ★判断4（§S25·钥匙不占 GA 维度）：纯钥块全舍 → pool = [剑块, 盾块] + 宝石块（钥块【不进 pool】）。钥块 id
+      仍记 meta["keys"]（+16826 哨兵直接用 meta 拼基因走封板 decode·不靠 pool）；命门坐实 navigate_to 自拿开门钥。
     返回 (pool, meta, block_markers)：
-      · pool         : 块 id 有序去重列表（GA 基因元素）；
-      · meta         : 角色→块 id（sword/shield/keys/gems）+ cells（原 cell 来源）+ block_roles/rep/cells（dump 用）；
-      · block_markers: {块 id: frozenset(该块折进的 pool 物品 cell)} —— 规整进包判据（块"进包"＝整块物品全吸）。"""
+      · pool         : 块 id 有序去重列表（GA 基因元素·剑/盾/宝石·【无钥块】）；
+      · meta         : 角色→块 id（sword/shield/keys/gems·keys 留作哨兵/诊断）+ cells（原 cell 来源）+ block_roles/rep/cells；
+      · block_markers: {pool 块 id: frozenset(该块折进的 pool 物品 cell)}（仅剑/盾/宝石）—— 规整进包判据（块"进包"＝整块全吸）。"""
     ranked_cells = {c for (_drp, c, _da, _dd) in ranked}
     sword_c = next((c for (_drp, c, da, _dd) in ranked if c in big_cells and da > 0), None)
     shield_c = next((c for (_drp, c, _da, dd) in ranked if c in big_cells and dd > 0), None)
@@ -391,15 +468,17 @@ def build_min_pool(big_cells, ranked, cands, block_index):
         return c2b[c]
 
     sword, shield = bid(sword_c), bid(shield_c)
-    keys = _dedup([bid(c) for c in keys_c])     # 五钥可能归并同块 → 去重
+    keys = _dedup([bid(c) for c in keys_c])     # 五钥可能归并同块 → 去重（meta 留作哨兵/诊断·判断4 不进 pool）
     gems = _dedup([bid(c) for c in gems_c])
-    pool = _dedup([sword, shield] + keys + gems)
+    # ★判断4（§S25·钥匙不占 GA 维度）：纯钥块全舍、不进 pool——navigate_to 命门坐实会自绕拿开门钥（被舍
+    #   钥块顺路自拿）。钥块 id 仍记 meta["keys"]：+16826 哨兵直接用 meta 拼基因走【封板 decode】（不靠 pool/
+    #   block_markers）→ 哨兵零改自动守住。舍钥在【所有产池处一致】（与 launcher 34→13 同口径·不打补丁）。
+    pool = _dedup([sword, shield] + gems)
     assert pool and len(pool) == len(set(pool)), f"块 id 池应非空无重复，实得 {pool}"
 
-    # block_markers（规整进包判据）+ 来源标注（dump 用）：每块折进了哪些 pool 物品 cell
+    # block_markers（规整进包判据·仅 pool 块＝剑/盾/宝石·钥块已舍）+ 来源标注（dump 用）：每块折进哪些 pool 物品 cell
     block_markers, block_roles = {}, {}
-    for c, role in ([(sword_c, "剑"), (shield_c, "盾")]
-                    + [(c, "钥") for c in keys_c] + [(c, "宝石") for c in gems_c]):
+    for c, role in ([(sword_c, "剑"), (shield_c, "盾")] + [(c, "宝石") for c in gems_c]):
         b = bid(c)
         block_markers.setdefault(b, set()).add(c)
         block_roles.setdefault(b, []).append((role, c))
@@ -469,18 +548,30 @@ def build_harness(*, persistent=False):
     block_index = build_block_index(sorted(index_fids))
     pool, meta, block_markers = build_min_pool(big_cells, ranked, cands, block_index)
 
+    # ★§S25 红钥末腿目标（判断3 方案c）：红钥块抽成 eval 层强制末腿（【不进 pool】）。这里只【涌现 red_block +
+    #   red_markers】放进电池组，由 launcher 喂 make_decode_fitness_eval 的 final_goal/final_markers/final_max_pops。
+    #   红钥 cell 从 detect_key_targets 的 colors 全集取 redKey 色（不手写裸坐标·塔无关红线）→ 折成块 id。
+    c2b_all = block_index["cell_to_block"]
+    red_cells = sorted(c for c, col in info_key["colors"].items()
+                       if col == "redKey" and c in c2b_all)
+    red_block, red_markers = None, None
+    if red_cells:
+        red_block = c2b_all[red_cells[0]]
+        red_markers = frozenset(c for c in red_cells if c2b_all[c] == red_block)
+
     decode_cache_in = None
     if persistent:
         from nav_cache import PersistentNavCache
         decode_cache_in = PersistentNavCache()
     eval_fn, decode_cache = make_decode_fitness_eval(
         start, zone, step, roster_fit, big, zone_fids, decode_cache=decode_cache_in,
-        block_markers=block_markers, block_cells=meta["block_cells"])   # §S15 禁区开
+        block_markers=block_markers, block_cells=meta["block_cells"])   # §S15 禁区开（红钥末腿由 launcher 显式接）
 
     return dict(start=start, zone=zone, step=step, pool=pool, meta=meta, ranked=ranked,
                 big_cells=big_cells, cands=cands, info_key=info_key,
                 roster_fit=roster_fit, big=big, zone_fids=zone_fids,
                 block_index=block_index, block_markers=block_markers,
+                red_block=red_block, red_markers=red_markers,
                 eval_fn=eval_fn, decode_cache=decode_cache, s689=s689, s718=s718)
 
 
