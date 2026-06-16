@@ -118,6 +118,11 @@ class FloorState:
     # 可被地震卷轴 earthquake 破坏的 tile 集合（数据驱动，来自 tiles.json canBreak:true）。
     # 引擎 earthquake.useItemEffect = searchBlockWithFilter(block.event.canBreak)→openDoor。见 mechanics §L.6
     _can_break_tiles: set = field(default_factory=set)
+    # 事件 enable 的 per-state 覆盖（loc_key -> bool）：show 显形(True) / keep-move 搬空(False)。
+    # 不就地改共享的 events dict（events 在 _copy_state 按引用共享、上方注释声明 "read-only
+    # after load"）。读点经 _eff_enable 把此覆盖叠加在静态 ev["enable"] 之上。这修掉了分支
+    # 搜索（beam/GA/quotient）里一支 show/move 污染兄弟支及 base 的 bug（见 _eff_enable）。
+    _event_enable: dict = field(default_factory=dict)
 
     @property
     def map(self) -> list:
@@ -202,6 +207,7 @@ def _copy_state(state: GameState) -> GameState:
             _tile_to_common_event=f._tile_to_common_event,
             _suppressed_events=set(f._suppressed_events),
             _done_after_battle=set(f._done_after_battle),
+            _event_enable=dict(f._event_enable),
             _event_intercepting=f._event_intercepting,
             _event_pending_instrs=list(f._event_pending_instrs),
             _event_pending_choices=list(f._event_pending_choices),
@@ -412,6 +418,19 @@ def _execute_floor_fly(state: GameState, target_floor_id: str) -> None:
     state.visited_floors.add(target_floor_id)
 
 
+def _eff_enable(floor, loc_key, ev, default=None):
+    """事件 enable 的 per-state 有效值：先看 _event_enable 覆盖（show/keep-move 写入），没有
+    再取静态 ev["enable"]，都没有则返回 default。
+    为何不直接改 ev["enable"]：events dict 在 _copy_state 按引用共享，就地改会污染兄弟分支与
+    base（boss 段杀队长 afterBattle 的 show([6,11]) 把下楼梯永久启用、漏过 weak 分支零损血绕
+    路下楼即此 bug；分支搜索 beam/GA/quotient 普遍受影响、线性重放抓不到）。"""
+    if loc_key in floor._event_enable:
+        return floor._event_enable[loc_key]
+    if isinstance(ev, dict) and "enable" in ev:
+        return ev["enable"]
+    return default
+
+
 def _apply_stair_change(state: GameState) -> bool:
     """检查英雄是否踩上楼梯 changeFloor 格，若是则立即切层。返回是否发生了切层。
     若目标楼层文件不存在（范围外），视为不可通行，返回 False。"""
@@ -421,7 +440,7 @@ def _apply_stair_change(state: GameState) -> bool:
         return False
     # h5mota: show 指令激活前 enable=False，楼梯不触发
     ev = state.floor.events.get(loc_key)
-    if isinstance(ev, dict) and ev.get("enable") is False:
+    if _eff_enable(state.floor, loc_key, ev) is False:
         return False
     target_id = _resolve_floor_id(state, cf["floorId"])
     if not _load_floor_if_needed(state, target_id):
@@ -1023,7 +1042,7 @@ def _process_move(state: GameState, direction: str) -> None:
     if e_tile in floor._tile_to_entity:
         ev = floor.events.get(f"{nx},{ny}")
         # 事件已禁用（enable: false）→ hero 直接通过（如 MT1 作者NPC）
-        if isinstance(ev, dict) and ev.get("enable") is False:
+        if _eff_enable(floor, f"{nx},{ny}", ev) is False:
             hero.x, hero.y = nx, ny
             _fire_out_events(state, ox, oy)
             _apply_zone_damage(state, nx, ny)
@@ -1420,7 +1439,7 @@ def _fire_events(state: GameState, x: int, y: int) -> None:
     event_data = floor.events[loc_key]
 
     if isinstance(event_data, dict):
-        if not event_data.get("enable", True):
+        if not _eff_enable(floor, loc_key, event_data, default=True):
             return
         data = event_data.get("data", [])
         if data:
@@ -1549,14 +1568,14 @@ def _execute_instruction(
                 for lx, ly in _norm_loc_pairs(instr.get("loc"), state):
                     ev = tf.events.get(f"{lx},{ly}")
                     if isinstance(ev, dict):
-                        ev["enable"] = True
+                        tf._event_enable[f"{lx},{ly}"] = True
             return
         for loc in instr.get("loc", []):
             lx, ly = loc[0], loc[1]
             lk = f"{lx},{ly}"
             ev = floor.events.get(lk)
             if isinstance(ev, dict):
-                ev["enable"] = True
+                floor._event_enable[lk] = True
         return
 
     # ── hide ─────────────────────────────────────────────────────────────────
@@ -1785,7 +1804,7 @@ def _execute_instruction(
             # 落点且该格事件本身带 enable 字段，不碰 MT1 那些从不被 move 的装饰 NPC。
             dest_ev = floor.events.get(f"{dx},{dy}")
             if isinstance(dest_ev, dict) and "enable" in dest_ev:
-                dest_ev["enable"] = (tile_id != 0)
+                floor._event_enable[f"{dx},{dy}"] = (tile_id != 0)
         return
 
     # ── if ────────────────────────────────────────────────────────────────────

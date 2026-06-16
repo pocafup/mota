@@ -562,3 +562,37 @@
 #### 【四、本 session 交接 / 下一步】
 - 入库：`solver/quotient.py`(修红门·门控默认关) + 3 只读脚本(`curriculum_dump_zone1` / `curriculum_validate_boss` / `curriculum_scan_vboss`)。封板件 fitness/decode/navigate_to/detect 零改、beam 零回归(270 绿)。
 - **下一步（课程学习框架第 2 步）**：把 V_boss 落成可查的稠密奖励（粗网格预计算+插值），往回照亮**攒攻防段**——每个攒攻防状态查 V_boss(它的属性) 得真实价值梯度，正面解稀疏奖励/深谷死；再考虑段切分往更上游传播。补严谨 V_boss 表前先 trace delta=0 平台机制 + 弱格饱和复核。
+
+---
+
+### §S29 修 events 污染 bug（封板 simulator 授权外科）+ V_boss/fitness 关系厘清 + 小验证配线（★小验证未跑·钉死前提）（2026-06-16）
+
+> 接 §S28（V_boss 表坐实、框架可行）。本 session 做三件**前置**、第四件（小验证）**故意未跑**（玩家叫停先钉死状态落盘后 clear）：①修 §S28 留的 delta=0 平台机制 = **events 污染 bug**（确认+外科修复·beam 47 守卫字节级零回归）；②厘清 V_boss 该评什么、和 fitness 什么关系（收回一个过度简化判断）；③把"gene→seam→查 V_boss"的配线**设计清楚**并**钉死一个关键前提**。**小验证（关键岔路·甲/乙）下个 session 才跑。**
+
+#### 【一、★events 污染 bug：确认 + 外科修复（封板 simulator.py + quotient.py·玩家已授权）】
+- **病根坐实**（trace 脚本 `analysis/curriculum_trace_delta0.py` 控制实验证）：`_copy_state` 把 `events` dict **按引用共享**（simulator.py 注释声明 events "read-only after load"），但 `show` 指令就地写 `ev["enable"]=True`、`keep-move` 就地写 `dest_ev["enable"]=(tile_id!=0)` → **一支搜索的事件改动污染兄弟支及 base**。线性重放（存档）无分支故抓不到；**任何分支搜索（beam/GA/quotient）普遍受影响**。
+- **§S28 delta=0 平台 = 此 bug 的伪信号**（§S28 诚实保留①解了）：杀队长 afterBattle 的 `show([6,11])` 把 MT10 下楼梯**永久启用**并污染到弱分支 → 弱分支没打 boss 就"零损血绕路下楼梯"出段 → `final_hp=HP_in`（delta=0）。**delta=0 不是真机制（不是"零战斗路线"）、是污染 artifact。** 修后弱分支（HP<生死线）应**老实 found=False（死在半路）**，不再有假 delta=0 行。§S28 的 **2D 表（HP=735·生还格真打 boss）仍可靠**——只有 1D-HP 扫的低 HP"delta=0"行是污染。
+- **修法＝最小外科 per-state 覆盖（玩家定的 `_enabled_events` 模式）**：FloorState 加 `_event_enable: dict[loc_key->bool]`（`_copy_state` 浅拷一份·便宜）；show/keep-move **写覆盖**不动共享 events；新 helper `_eff_enable(floor, loc_key, ev, default)` 在**所有读点**把覆盖叠加在静态 `ev["enable"]` 上。用 **dict 非 set**（keep-move 要写 False）。改动点：simulator.py 9 处（字段/拷贝/helper/3 读点 443/1045/1442/3 写点 1568/1578/1804）+ quotient.py 2 处（import + `_live_arrive_event:84` 读点改走 `_eff_enable`，因它读 runtime `floor.events`、复刻引擎门控，不改则 show 启用的到达事件漏判）。
+- **★beam 47 守卫字节级全绿（零回归确认·玩家最关心）**：4 守卫（big_item_pull/door_value/region_potential/pull）点名 **47 passed**、pytest 非 slow **270 passed**。**修复没改 beam 产品结果**——这是修掉一个**潜伏** bug（beam 现用法没被它咬到、或没被守卫覆盖到的方式咬），属"去隐患零回归"非"修正 beam 输出"。
+- **beam.py:205 `_is_region_boundary` 不受影响**：它读**静态 JSON** `floor_data["events"]` 判 boss 门 zone 边界、不读 runtime → 本修复反而**消除**了它一处潜在污染风险，无须改。
+
+#### 【二、V_boss/fitness 关系厘清（收回一个过度简化判断·见 memory `feedback-vboss-fitness-relationship`）】
+- **收回"HP155 是 fitness 判不准实锤"**：fitness 评的是"地上剩余血瓶 + HP + 钥匙的**等价 HP**"（不只瞬时 HP）。HP155 低但地上有血瓶（钥匙能拿）→ 等价 HP 不低 → fitness 给那个分**合理**、是 GA 当前 navigate 局限下的**合理最优**，非废解。
+- **★V_boss 该评 SEAM（boss 入口到达态）、不是中间态瞬时**：到达态已整合早期所有决策 + 路上回血 → 在 seam 查**自动满足"前期烧血没关系"**（按净到达态判·阈值下 V_boss=0 不是负）。在中间态查瞬时属性会**前期误罚烧血**（漏掉中间→seam 的回补）。§S27"逐状态查 V_boss 当稠密奖励"的提法因此有缺陷——稠密是在 (a,d,h)-到达空间里、用在 seam 不是每个 timestep。
+- **★配合非替换**：fitness 管中间态潜力（含可达血瓶/钥匙的线性等价 HP·处处稠密梯度）；V_boss 管 seam 终值（boss 段 nonlinear 拐点 + 连杀 sequencing + key-gating·线性等价 HP 漏掉的）。**score = fitness + λ·V_boss**（V_boss 作非负 terminal bonus 叠在 fitness 上）→ 既解死区无梯度、又不前期误罚烧血。**别简单"换掉 fitness"**（换掉抹掉 fitness 信号、前期误罚烧血）。
+
+#### 【三、小验证配线设计（已设计·★未跑）+ 钉死的关键前提】
+- **gene→seam→查 V_boss 配线**（不碰封板件、新写一只读 smoke 脚本，下个 session 落地）：
+  1. `build_harness()` 出 start/zone/step/13 块 pool/block_markers/meta["block_cells"]/roster_fit/big/zone_fids/decode_cache。
+  2. `_decode_with_order(gene, ...)`（**不传 final_goal**）跑主基因 → 得 `term_state`（gene 攒攻防自然终态）。`base = fitness(term_state)`（= 现有 GA 信号·原样）。
+  3. **seam 腿**：`navigate_to(term_state, ("MT10",1,11), zone, step, max_pops≈8000, cache)` → `(seam_state, moves, reached)`。**★不能复用红钥末腿的 `reached_final`**（它靠 `_taken`=判该 cell 物品被吸、但 seam 是**楼梯格无物品**→ `_taken` 恒 False）；必须**直接用 navigate_to 返回的 `reached` 布尔**判到没到 seam。
+  4. `reached` 真 → **V_boss(seam_state)** = `search_quotient(seam_state, GOAL=("MT11",6,10), seg_step{MT10,MT11}, max_states≈400k, cross_floor=True, beam_k=None, distinguish_doors=True).final_hp if found else 0`（复刻 `curriculum_scan_vboss.py` 口径）。`reached` 假 → V_boss=0。
+  5. `score = base + λ·V_boss`（λ 候选 10·让 bonus 真咬·但 fork 判据与 λ 无关）。**纯 fitness 组 = λ=0**（同 seed 对照）。
+  6. **每个 gene 记 (base, reached_seam, seam HP/ATK/DEF, V_boss)** → fork 判据 = **有没有任一 gene 的 V_boss>0**。
+- **seam_state 带 gene 自己的钥匙/金/红钥**（非真存档的）→ 没收红钥的 gene 查 V_boss 时**开不了红门到不了 boss → V_boss=0 是真信号**（玩家说的"留够钥匙"要求·非配置 bug）。
+- **★★钉死的关键前提（否则小验证 V_boss=0 是假信号·会误判成上乙）**：**seam 必须在 zone（navigate_to 到达范围）内**，否则 final_goal 永远失败 → V_boss 永远 0、但这跟"navigate 瓶颈"无关、是配置问题。**查证结果：`ZONE1 = [f"MT{i}" for i in range(1,11)]` = MT1..MT10、★包含 MT10。** `build_zone` 建了 MT9↔MT10 楼梯免费边（`down_stair["MT9"]=(1,11) ↔ up_stair["MT10"]=(1,11)`、link 实测存在），seam = **MT10(1,11)** 在 navigate 到达范围内。**→ 小验证若出 V_boss=0 是真信号**（navigate 送不出可存活 seam / gene 没攒够钥匙血量）、**不是配置假信号**。前提已排除。
+
+#### 【四、本 session 交接 / 下一步】
+- **入库**：`sim/simulator.py` + `solver/quotient.py`（events 污染 bug 外科修复·beam 47 守卫绿·零回归）+ 2 只读诊断脚本（`curriculum_trace_delta0`=bug 控制实验证据 / `curriculum_weakcell_saturation`=§S28 弱格饱和复核·暂搁）。**小验证脚本未写、未跑。**
+- **★下个 session 第一步＝跑小验证（关键岔路）**：按【三】配线写 smoke（pop8/gen3·λ=10 + 对照 λ=0）→ 报 **①有没有 gene 到 seam（reached）②有没有 V_boss>0 ③最优解 seam 态属性/HP/V_boss ④对比纯 fitness 组**。判据：**有 V_boss>0 → 甲（GA+V_boss）可行、eval 是瓶颈一部分、继续甲**；**仍全 0（且已确认 seam 在 zone）→ navigate/搜索力瓶颈（GA"选块不带路线"架构锅）→ 上乙（state-centric 搜索）**。
+- **§S28 诚实保留②（弱格 735 饱和）**：本 session 因重心转向**降级搁置**（脚本 `curriculum_weakcell_saturation` 在库）；甲/乙定了再回头。

@@ -35,7 +35,7 @@ from collections import deque, Counter, namedtuple
 from sim.simulator import (
     WALL_TILES, SPECIAL_DOOR, AUTO_OPEN_TILES, DOOR_KEY_MAP,
     _in_alive_monster_footprint, _live_zone_monsters, _in_zone_range,
-    _is_adjacent, _build_monster,
+    _is_adjacent, _build_monster, _eff_enable,
 )
 from sim.combat import PlayerState, compute_combat
 from solver.search import SearchResult, _value_map, _ge_all
@@ -81,7 +81,7 @@ def _live_arrive_event(floor, x, y):
     ev = floor.events.get(loc)
     if ev is None:
         return False
-    if isinstance(ev, dict) and not ev.get("enable", True):
+    if isinstance(ev, dict) and not _eff_enable(floor, loc, ev, default=True):
         return False
     return True
 
