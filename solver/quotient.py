@@ -44,6 +44,9 @@ value_vector = _value_map
 
 _DELTAS = {(0, -1): "U", (0, 1): "D", (-1, 0): "L", (1, 0): "R"}
 
+# 门类 tile（通用引擎语义，非塔特有）：钥匙门 + 特殊门 + 自开假墙。开门 = 该格 terrain→0 移出本集。
+_DOOR_TILES = set(DOOR_KEY_MAP) | {SPECIAL_DOOR} | AUTO_OPEN_TILES
+
 
 # ─── 自由块（零损血连通区）─────────────────────────────────────────────────────
 
@@ -354,18 +357,36 @@ def _resolve_choices(state, base_moves, step_fn, max_depth=64):
 
 # ─── 商图指纹 + 搜索 ──────────────────────────────────────────────────────────
 
-def _qfp(state, free):
+def _closed_door_cells(floor):
+    """当前层仍关着的门格集合（terrain ∈ 门类 tile）。开门 = 该格 terrain→0 移出本集 → 身份维变。
+    塔无关：门类 tile 取自通用 DOOR_KEY_MAP/SPECIAL_DOOR/AUTO_OPEN_TILES，不写死任何塔特有坐标；
+    只读当前 terrain，不解释任何事件（区别于『修自由格』须判事件条件分支=解释自定义事件，踩红线）。"""
+    return frozenset((x, y)
+                     for y, row in enumerate(floor.terrain)
+                     for x, t in enumerate(row)
+                     if t in _DOOR_TILES)
+
+
+def _qfp(state, free, distinguish_doors=False):
     """商图身份维：当前层 + 自由块（frozenset 自由格，剔除换层格）+ flags + 全局开关。自由格集合
     已编码「哪些怪/门已消除」（消除即并入自由块）→ 不同可达态 = 不同指纹。持有资源不入（归价值维）。
     剔除换层格：跨层落点英雄正踩楼梯格 vs 吸收后离开，可达块本体相同 → 身份维不应因「是否正踩楼梯」
-    分裂（楼梯格不连通 floodfill、仅作英雄落点单格出现，剔除不会并掉两个真实分量）。"""
+    分裂（楼梯格不连通 floodfill、仅作英雄落点单格出现，剔除不会并掉两个真实分量）。
+
+    distinguish_doors（默认 False=字节零回归，beam/历史调用全走此路、指纹逐字段不变）：True 时把
+    「当前层仍关着的门格集合」追加进身份维。修『红门支配 bug』——开门若落到惰性事件格(自由块不增、
+    无 flag)，则『开门态(少钥)』与『未开门态(多钥)』身份维全同 → 开门态被 Pareto 支配剪掉 → boss
+    真起点搜不通。把门开闭编码进身份后两态分指纹、开门态不再被剪。仅课程学习路开启（守 beam 红线）。"""
     h = state.hero
     flags = tuple(sorted((k, v) for k, v in h.flags.items()
                          if isinstance(v, (int, float, str, bool))))
     cf_xy = {tuple(map(int, k.split(","))) for k in state.floor.change_floor}
     ident = frozenset(c for c in free if c not in cf_xy)
-    return (state.current_floor, ident, flags,
+    base = (state.current_floor, ident, flags,
             state.auto_mode, state.dead, state.won)
+    if not distinguish_doors:
+        return base
+    return base + (_closed_door_cells(state.floor),)
 
 
 def _stairs_key(state):
@@ -438,7 +459,7 @@ def _beam_truncate_wave(next_pts, beam_k, st, wave_idx, sink, future=None, diver
 def search_quotient(entry_state, goal_cell, step_fn, max_states=2_000_000, cross_floor=False,
                     beam_k=None, beam_cut_sink=None, on_admit=None, beam_future=None,
                     beam_diversity=None, beam_score_fn=None, allow_purchase=False,
-                    beam_score_extra=None):
+                    beam_score_extra=None, distinguish_doors=False):
     """块图搜索：从 entry_state 出发，停在 goal_cell 且出口价值 Pareto 最优。
     输出契约对齐 solver.search.search_segment（found/goal_frontier/goal_frontier_actions/统计）。
     cross_floor=False（默认，phase1 段内）：任何离层子态裁掉（跨层由 phase1 forced 骨架处理）。
@@ -474,7 +495,10 @@ def search_quotient(entry_state, goal_cell, step_fn, max_states=2_000_000, cross
       撞 choices 即记 intercept_locs 并跳过、与原版【字节一致】（搜索结构性买不了任何东西）；True →
       对每个拦截子态用 _resolve_choices 按选项分支真实 step CHOICE，把「买/不买、买 N 次」全展开成
       并列子态进同一去重/入队管线，让「买不买、买几次」由价值（Pareto+beam）自行收敛，不写死次数。
-      这是补【购买能力】、非加估值项；intercept_locs 两路都照记（开时=买过的点也留痕，便于审计）。"""
+      这是补【购买能力】、非加估值项；intercept_locs 两路都照记（开时=买过的点也留痕，便于审计）。
+    distinguish_doors（默认 False）：是否把「当前层仍关着的门格集合」并入商图身份维（_qfp）。False
+      （默认）→ 指纹与历史逐字段一致、beam 字节零回归；True → 修『红门支配 bug』（开门落惰性事件格时
+      开门态被未开门态 Pareto 支配剪掉、boss 真起点搜不通），仅课程学习路开启。详见 _qfp 注释。"""
     goal_floor, gx, gy = goal_cell
 
     if beam_diversity is None:
@@ -500,7 +524,7 @@ def search_quotient(entry_state, goal_cell, step_fn, max_states=2_000_000, cross
     start, start_moves = _absorb(entry_state, step_fn)
     visited = {}
     free0 = _free_cells(start)
-    visited[_qfp(start, free0)] = [value_vector(start)]
+    visited[_qfp(start, free0, distinguish_doors)] = [value_vector(start)]
     st.states_admitted = 1
     n_ops_total = 0
     block_sizes_seen = []
@@ -560,7 +584,7 @@ def search_quotient(entry_state, goal_cell, step_fn, max_states=2_000_000, cross
                     if rchild.dead:
                         continue
                     child_free = _free_cells(rchild)
-                    fp = _qfp(rchild, child_free)
+                    fp = _qfp(rchild, child_free, distinguish_doors)
                     cvec = value_vector(rchild)
                     cur = visited.get(fp)
                     if cur is not None and any(_ge_all(v, cvec) for v in cur):
