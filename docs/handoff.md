@@ -654,3 +654,33 @@
 #### 【六、★下个 session 第一步（别一上来全塔大实现）】
 1. **设计阶段 1**（带 V_boss 的 A\* move 级搜索的状态编码 / 转移 / Pareto 剪枝 / V_boss 接缝启发）。
 2. **验证一小段**：接缝往前一小段（如 **MT9 盾 → SEAM=MT10(1,11)**），验 **move 级 A\* + V_boss 范式 work 不 work + 状态爆不爆**。小段 work 了再往前扩段。
+
+---
+
+### §S32–§S33 小验证执行 + ★HP 口径核实（玩家质疑"324>292 能否判优"）（2026-06-16）
+
+> 接 §S31「下个 session 第一步：验证 MT9 盾 → SEAM 一小段」。本 session：①执行该小验证（§S32）→ 揪出 `SEAM=(MT10,1,11)` 结构不可达 bug、修正真落点=(1,10)；②玩家质疑"穷尽 HP324 > navigate HP292 = 穷尽优"的口径 → 核实（§S33）→ **证伪"留态严格优"、改为时序差非终局优**。**全程只读·没碰产品码/navigate/GA。**
+
+#### 【§S32 小验证结果】（`analysis/seam_astar_smoke.py`·零改 quotient.py）
+- 四问全绿：①穷尽 `search_quotient` 用**现有算子就搜通** MT9→seam（found=True·goal_hits=1266）②穷尽 max-HP 出口持有维支配 navigate（口径见 §S33 改正）③状态**不爆**（distinct_fp=21488<600k）④给 **32 点 Pareto 前沿**（拿盾/省血取舍·navigate 给不出）。
+- **关键判断：算子级够用 → 不需 move 级重写、A\* 化 `search_quotient` 方向确认**。唯一瓶颈=**穷尽 553s/段太慢**（整层 MT9 全展开）→ 正是 A\* 要剪的。
+- **★SEAM bug 修正**：原钉死的 `SEAM=(MT10,1,11)` 是**换层楼梯格、结构不可达**（踩上即弹走·`quotient.py:98` 判非自由格）；真落点=**MT10(1,10)**。§S30"navigate 送不到 seam=架构天花板"那条证据被此 bug 污染（修正后 navigate 能到 seam）。§S28 V_boss 表用真实 tok1168、**不受影响**。详见 memory `project-seam-cell-bug`。
+
+#### 【§S33 ★HP 口径核实结论："324>292 → 穷尽优"【未证成】】（`seam_caliber_check.py`+`seam_geography_probe.py`·只读）
+- **两 seam 态同位置 MT10(1,10)**：穷尽 HP324/DEF20/yellowKey=1 vs navigate HP292/DEF10/yellowKey=1（**同持钥、同道具**）。穷尽持有维确支配 navigate（+32HP +10DEF +6金 +2杀）。
+- **但这领先=时序差、非终局优**：穷尽多的 +32HP/+10DEF 正是它花 **1 黄钥绕路早拿**了 navigate **留在 MT9 地上的铁盾 shield1 + 红血瓶 redPotion**（实测 navigate MT9 地上剩 redPotion×1+shield1×1+yellowKey×5；穷尽剩 yellowKey×4；两态 **MT10 地上剩余完全相同**）。
+- **★这些地上资源可后取**：真实路线 **seam 后回 MT9 三次**（token 2176/2511/5063）→ navigate 晚点也能拿 → "拿早 vs 拿晚"。**算上"持有 + 可后取地上"则谁都不支配谁。**
+- **且 seam ≠ boss 入口**：seam=首跨 MT10=token788、**redKey=0**；boss 段起点 tok1168=**第 5 次**进 MT10、距 **380 token**、redKey 要到 token1031 才到手 → **seam 快照不衡量 boss 战力**，"现在马上打 boss 能凑最高血"口径不成立。
+- **★坐实玩家"晚拿血=多潜力"直觉**（别拿当前 HP 当优劣·见 memory `feedback-vboss-fitness-relationship`）。
+- **navigate 没拿盾 = 贪心判断不值绕路**（盾在 MT9 地上**可达**·§S30"血够不绕路"），**非结构不可达**。
+- **★真正站得住的"搜索 > navigate"证据**：穷尽给出**含早拿盾的 32 点 Pareto 取舍前沿**、navigate 贪心只能给死一个点（**路径决策被打开**）——**不依赖 HP 比较**。
+- **★不翻方向**：算子级 `search_quotient` 够用 + A\* 化方向**仍坐实**（靠"打开路径决策取舍前沿"这个真证据、非 HP 比较）。
+
+#### 【两个遗留（本轮按只读红线没动）】
+1. **`seam_astar_smoke.py` 钥匙显示 bug**：前沿打印取 `v.get("yellowKey")` 而非 `v.get("key:yellowKey")`（`_value_map` 存带前缀键）→ 恒打 `钥={}`、误导过判断（曾让人误以为"穷尽花光钥匙"）。**一行可修·下轮修**（仅显示·不影响搜索/支配判定）。
+2. **新增两个只读诊断脚本**：`analysis/seam_geography_probe.py`（seam↔boss 地理/往返/红钥时机）、`analysis/seam_caliber_check.py`（两 seam 态完整状态 + 地上剩余 + Pareto 支配判定）。
+
+#### 【★下个 session 第一步：动手写 A\* 化 search_quotient】
+- **目标**：把 `search_quotient` **A\* 化**（最小改动 + 开关守 beam 零回归），用**同一小段 MT9 盾→seam** 对照 **穷尽 553s vs A\* 多少秒 / 多少展开数**，看 A\* 化能不能**把 553s 砍下来 + 保持搜通（found=True）+ 状态不爆**。
+- A\* 启发：朝 seam 排序的优先队列·h=损血下界 / V_boss 当终值（§S31 三要点）。
+- **顺手**可修 `seam_astar_smoke.py` 钥匙显示 bug 一行。
