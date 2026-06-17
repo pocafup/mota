@@ -43,6 +43,7 @@ except Exception:
 from analysis.extract_zone1_milestones import build_initial_state, load_tokens
 from sim.simulator import step
 from solver.quotient import search_quotient
+from extract.encode_route import write_h5route
 
 TOK_SHIELD = 454               # 铁盾刚到手 MT9(9,7) HP166 ATK22 DEF20 钥黄2蓝1（§S36 坐实）
 REDKEY_CELL = ("MT8", 10, 2)   # 一区唯一红钥（tok945 到手）= 本段 goal
@@ -131,11 +132,77 @@ def replay_to_token(tok_idx):
     return s
 
 
+def export_h5route(res, tag):
+    """found=True 时：拼 tokens[:455] 前缀（开局→铁盾·玩家存档真实动作）+ beam RULD（铁盾→红钥）
+    → 从开局完整 .h5route + sim 独立重放自检（CLAUDE.md 铁律：解丢回真实引擎走通才导）。
+    seed 用玩家存档真实 meta（2097323316）→ 网站从开局正确回放。纯 analysis 层、不碰封板件。"""
+    tokens, outer = load_tokens()
+    prefix = list(tokens[:TOK_SHIELD + 1])      # 开局 MT1 → 铁盾 MT9(9,7)
+    beam_acts = list(res.actions)               # 铁盾 → 红钥（beam 纯 U/D/L/R）
+    full = prefix + beam_acts
+    print(f"\n  ── 导出 h5route + sim 独立重放自检 ──")
+    print(f"  full = 前缀{len(prefix)}(开局→铁盾) + beam{len(beam_acts)}(铁盾→红钥) = {len(full)} token")
+    # sim 从开局独立重放（真实 step·无 seg 限制）；到红钥格才导，否则不给玩家坏文件
+    s = build_initial_state()
+    for t in full:
+        s = step(s, t)
+        if s.dead:
+            break
+    gf, gx, gy = REDKEY_CELL
+    reached = (s.current_floor == gf and (s.hero.x, s.hero.y) == (gx, gy) and not s.dead)
+    print(f"  重放终态: {fmt(s)}")
+    if not reached:
+        print(f"  ✗ 重放未停在红钥格 {REDKEY_CELL} → 不导出（链路须排查·别给玩家坏文件）")
+        return None
+    meta = {"name": outer.get("name", "51"), "version": outer.get("version", "Ver 3.0"),
+            "hard": outer.get("hard", ""), "seed": outer.get("seed")}
+    out_path = ROOT / f"dir2_redkey_fromstart_{tag}.h5route"
+    write_h5route(out_path, full, meta)
+    print(f"  ✓ sim 重放走到红钥格 → 已导出 {out_path.name}")
+    print(f"    (meta seed={meta['seed']}·网站从开局回放；{len(full)} token)")
+    return out_path
+
+
+def export_halfway_h5route(best_acts, tag):
+    """found=False 时：导【半截】h5route = beam 跑到的"最接近破门"grind 态（没到红钥）。
+    拼 tokens[:455] 前缀（开局→铁盾）+ best_acts['acts']（铁盾→grind 态·on_admit 抓的动作串）
+    → sim 独立重放自检终态吻合 on_admit 锚点（非红钥）→ 导出·明确标注半截非通关。"""
+    if not best_acts or best_acts.get("acts") is None:
+        print("\n  ✗ 无 beam 动作串可导半截（on_admit 未记到态）")
+        return None
+    tokens, outer = load_tokens()
+    prefix = list(tokens[:TOK_SHIELD + 1])      # 开局 MT1 → 铁盾 MT9(9,7)
+    beam_acts = list(best_acts["acts"])         # 铁盾 → grind 态（beam 纯 U/D/L/R）
+    full = prefix + beam_acts
+    snap = best_acts["snap"]
+    print(f"\n  ── 导出【半截】h5route(beam 最接近破门态)+ sim 独立重放自检 ──")
+    print(f"  锚点态(on_admit) = {snap[0]}({snap[1]},{snap[2]}) ATK={snap[3]} DEF={snap[4]} HP={snap[5]}")
+    print(f"  full = 前缀{len(prefix)}(开局→铁盾) + beam{len(beam_acts)}(铁盾→grind态) = {len(full)} token")
+    s = build_initial_state()
+    for t in full:
+        s = step(s, t)
+        if s.dead:
+            break
+    print(f"  重放终态: {fmt(s)}")
+    ok = (s.current_floor == snap[0] and (s.hero.x, s.hero.y) == (snap[1], snap[2])
+          and s.hero.atk == snap[3] and s.hero.def_ == snap[4]
+          and s.hero.hp == snap[5] and not s.dead)
+    meta = {"name": outer.get("name", "51"), "version": outer.get("version", "Ver 3.0"),
+            "hard": outer.get("hard", ""), "seed": outer.get("seed")}
+    out_path = ROOT / f"dir2_redkey_halfway_{tag}.h5route"
+    write_h5route(out_path, full, meta)
+    flag = "✓" if ok else "⚠ 重放与锚点不符"
+    print(f"  {flag} 已导出半截 {out_path.name}（seed={meta['seed']}·网站从开局回放到 grind 态）")
+    print(f"    ⚠ 这是半截：beam 卡在 ATK{snap[3]}/DEF{snap[4]}、没破红钥门 → 网站回放走到 grind 态停、非通关")
+    return out_path
+
+
 def run_one(start, goal, allowed, beam_k, max_states, diversity):
     """跑一次 beam 引导段搜索 + 各层进度统计。返回 res。"""
     seg_step = make_seg_step(allowed)
     # on_admit：记各层【到达过】(含日后被 beam 截掉的) 的最优属性/V，看 beam 把队伍推到哪
     best = defaultdict(lambda: {"atk": 0, "def": 0, "hp": 0, "V": BIG, "n": 0})
+    best_acts = {"key": (-1, -1), "acts": None, "snap": None}   # 全局“最接近破门”态→半截导出锚点
 
     def on_admit(child, _acts):
         h = child.hero
@@ -150,6 +217,11 @@ def run_one(start, goal, allowed, beam_k, max_states, diversity):
         v = v_boss_score(child)
         if v > b["V"]:
             b["V"] = v
+        k = (h.atk, h.hp)                  # 破门接近度：ATK 先过守卫 def22、tie 看 survivable HP
+        if k > best_acts["key"]:
+            best_acts["key"] = k
+            best_acts["acts"] = _acts
+            best_acts["snap"] = (child.current_floor, h.x, h.y, h.atk, h.def_, h.hp)
 
     t0 = time.time()
     res = search_quotient(start, goal, seg_step, max_states=max_states,
@@ -159,6 +231,7 @@ def run_one(start, goal, allowed, beam_k, max_states, diversity):
     secs = time.time() - t0
     res._secs = secs
     res._best_by_floor = dict(best)
+    res._best_acts = best_acts
     return res
 
 
@@ -211,11 +284,13 @@ def main():
         if res.found:
             print(f"\n  ★ 走到红钥！max-HP 出口 HP={res.final_hp}")
             print("  ⟹ 有损 beam + V_boss 引导让 9 层中段【可处理】→ 方向2 路通（量损待对照）。")
+            export_h5route(res, f"bk{bk}")
         else:
             mt8 = res._best_by_floor.get("MT8")
             reach8 = f"到过 MT8(maxATK{mt8['atk']}/DEF{mt8['def']}/HP{mt8['hp']})" if mt8 else "没到过 MT8"
             print(f"\n  ✗ 没走到红钥（{reach8}）。hit_cap={res.hit_cap}")
             print("  ⟹ 此 beam_k/分坑下够不到——加宽 beam / 换分坑 / 红钥须更上游资源（看各层进度判）。")
+            export_halfway_h5route(res._best_acts, f"bk{bk}")
 
 
 if __name__ == "__main__":

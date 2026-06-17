@@ -911,3 +911,73 @@ found=False（预算小）但**配管全通**：到达 MT8 红钥层（maxATK23/
   ② **加力重跑**：`python -u analysis/dir2_redkey_beam_probe.py --beam-k 800,1600 --max-states 800000`（或更大），看 maxATK 能否爬过阈值、found 翻 True、状态收没收住。
   ③ 若加宽/加预算仍卡 ATK25 上不去 → 查这 9 层的 ATK/DEF 物品总量是否够攒到阈值（可能高属性宝石锁在红门/其他门后 = 结构性需更上游资源）→ 这才轮到"红钥须更上游 / 调分坑 / 重想段链"。
 - **红线**：beam 零回归（现成钩子·零产品码改动·已守）、别拿脏 V_boss（§S37 已干净）、全程中文、**阈值用代码别手算**（CLAUDE.md）。
+
+---
+
+### §S39 ★方向2 便宜诊断：差的 1–2 点【加力能破·非结构性死结】（三脚本坐实·2026-06-17）
+
+> 接 §S38【五】下一步①+③（用代码算阈值 + 查 9 层物量·判加力值不值）。本 session 按红线**先便宜诊断、别盲目跑 800k 大预算**。三只新只读诊断脚本（全用引擎/源码、不手算、不碰产品码）回答"beam 卡 ATK25/DEF25/HP733 差的 1–2 点是加力能破还是结构性锁死"。**结论：加力能破——阈值差一口气、物量够、剩余宝石 real 可达无战力锁。** beam 47 零回归（三脚本均只读、未碰 search_quotient/beam.py）。
+
+#### 【①精确破门阈值（`analysis/dir2_redkey_gate_threshold.py`·引擎 compute_combat 算·非手算）】
+- yellowGuard（monsters.json）hp50/atk48/def22/无 special。引擎规则：`hero_atk ≤ def(22)` → 打不动（damage=None）；`damage ≥ hp` → 拒战站不住。
+- **ATK25/DEF25 杀单守卫损血 368、连杀两守卫总损 736 → survivable 须进场 HP ≥ 737。**
+- **beam 攒到的 ATK25/DEF25/HP733 差 4 HP**（733 < 737）：杀第 1 守卫 733→365、杀第 2 守卫需再损 368 但只剩 365 → 差 4 血拒战/死。
+- **破门只需三选一**：`+1ATK`（→26·杀两守卫各损 276、剩 181 血）／`+1DEF`（→26）／`+4HP`（→737）。= **差一口气、非差很多**。
+
+#### 【②9 层 ATK/DEF 物量（`analysis/dir2_redkey_supply_probe.py`·door-wise floodfill·_zone_floor_cells is_wall 门控）】
+- 破门前真实 afford = {yellowKey, blueKey}（无红钥·红门当墙）。9 层 door-wise 可达宝石：**5 redGem（ATK+5）/ 7 blueGem（DEF+7）** → 起点 ATK22/DEF20 的**理论上界 = ATK27/DEF27**。
+- **破门要 ATK26 或 DEF26 → 上界余量各 +1**（27 > 26·够）。
+- **★锁在红门/铁门/机关门后的 ATK/DEF 物量 = +0/+0（无一颗）** → **排除"高属性宝石锁红门后"这个最强结构性死结假设**（红钥是本段终点·没红钥·若关键宝石在红门后=破门前永久够不到=真死结；实测=零）。这 9 层无 yellowGem、无高剑盾在可达区，全靠 ratio=1 的散装红蓝宝石。
+
+#### 【③剩余宝石是否被打不过的怪锁死（`analysis/dir2_redkey_realreach_probe.py`·real-reach vs door-wise·引擎 _combat_damage 判怪格可穿）】
+- 构造 beam 卡住态（replay tok454 后属性 hack 到 ATK25/DEF25/HP733·只读模拟）。door-wise（守怪可穿=乐观上界）vs real（怪须打得过才穿）逐层对比。
+- **结果：5 redGem + 7 blueGem 全部 door-wise 可达 = real 可达**（无一颗"door 可达但 real 不可达"）→ **没有被打不过的怪挡住剩余宝石**。
+- beam 已收 3 红 5 蓝（→ATK25/DEF25）、剩 2 红 2 蓝都 real 够得到 → **beam 没收全 = 搜索/延迟满足问题（加宽 beam 有戏）、非战力锁（加力没用）**。
+
+#### 【★综合判定：加力能破·非结构性死结（三证一致）】
+1. **阈值差一口气**：差 +1ATK 或 +4HP（①）。
+2. **物量够 + 零宝石锁红门后**：door-wise 上界 ATK27/DEF27 > 需要的 26、关键宝石无一锁在不可开的门后（②）。
+3. **剩余宝石 real 可达无战力锁**：ATK25 态下剩 2 红 2 蓝全打得过沿途怪（③）。
+- **beam 卡的真因 = 延迟满足/搜索宽度**：§S38 跑 hit_cap=True、distinct_fp 仅 8123/300k（2.7%·重复严重）、9 层全均匀停在 ATK25/DEF25 → 300k 预算被重复态吃光、没把"先付（绕远拿最后 1–2 颗宝石、中途不涨属性甚至掉血）后兑现（ATK+1 破门）"那条延迟满足路径搜出来。**正是 beam 该剪却剪过了头的延迟满足边界。**
+
+#### 【★下一步＝玩家定（加力 or 重想·便宜诊断已交付·不盲目跑大预算）】
+- **诊断指向加力能破** → 若加力：`python -u analysis/dir2_redkey_beam_probe.py --beam-k 800,1600 --max-states 800000`（更宽 beam + 更大预算·**较久**·后台跑落 `analysis/` txt）。预期：maxATK 爬过 26 / found 翻 True / 看状态收没收住。
+- **若加力到 1600/800k 仍卡 ATK25 上不去** → 才轮到"换分坑维 / 红钥须更上游资源 / 重想段链"（②已排除物量死结、故大概率是 beam 宽度或延迟满足建模问题、非物理够不到）。
+- 三脚本均**只读入库**（`dir2_redkey_gate_threshold.py` / `dir2_redkey_supply_probe.py` / `dir2_redkey_realreach_probe.py`）、未碰封板件。
+
+### §S40 ★方向2 加力跑实测：加宽 beam【不破红钥】→ 落到 §S39 预测的"非宽度/非预算"分支（2026-06-17）
+
+> 接 §S39【下一步】加力跑 + 玩家要 h5route（h5mota 网站回放=真实游戏终极裁判）。本 session 干两件：①给 `dir2_redkey_beam_probe.py` 加 **h5route 导出**（开局 tok[:455] 真实前缀 + beam RULD·拼成从开局完整动作串·sim 独立重放自检·用玩家存档真 seed 2097323316）、`found=True` 导到红钥 / `found=False` 导半截 grind 态（纯 analysis 层·**beam 47 零回归**·未碰 search_quotient/beam.py）。②加力正式跑 beam_k=800,1600/800k。**结果：加宽 beam 不破红钥——§S39"加力能破"的乐观读法被实测证伪，落到 §S39 line945 自己预留的"非物理死结·换引导/更上游/重想"分支。**
+
+#### 【加力跑实测（`analysis/_dir2_beam_k800_1600.txt`）】
+| beam_k | max_states | found | hit_cap | maxATK | bestV | 耗时 | waves |
+|---|---|---|---|---|---|---|---|
+| 400（§S38 基线·本 session 复现逐字节一致） | 300k | False | True | 25 | −220 | 839s | 129 |
+| 800 | 800k | False | **False（saturate·只生成 632k<800k）** | 25 | −105（最佳） | 1610s | 154 |
+| 1600 | 800k | False | True | **24（反退）** | −219 | 1778s | 83 |
+
+#### 【★三个信号坐实：瓶颈=引导/抽象，不是宽度也不是预算】
+1. **k800 saturate（hit_cap=False·budget 没用满就 frontier 空了）** = 决定性证据：beam_k=800 下搜索**穷尽了它能到的 quotient 前沿**仍没红钥 → **加预算治不了**（632k 时自己停了、没用满 800k）。
+2. **k1600 反退到 ATK24**（比 400/800 的 25 还低）= **更宽 beam 反而更差** → 不是单纯"宽度不够"；加宽稀释了攒属性的聚焦（保留更多平庸属性态、同预算推进更慢、waves 83<154）。
+3. **distinct_fp ≈ 8900 在 400/800/1600 几乎恒定**（8123/8917/8790）= V_boss 贪心排序 + quotient 指纹把搜索**锁死在同一个 ~9000 态的 basin** 里反复打转（生成 60–80 万 / distinct 仅 ~9000 ≈ 1%）、**红钥可达态在这个 basin 之外**。加宽 beam 没把 basin 撑大。
+
+#### 【★综合判定（§S39 静态诊断仍成立，但不等于 beam 找得到）】
+- **§S39 的 ② ③ 静态可达诊断没错**：宝石物量够、real 可达无战力锁、零宝石锁红门后 → **不是物理/结构死锁**。
+- **但"加力（加宽 beam + 加预算）能破"被证伪**：静态可达 **≠** V_boss 贪心 beam 能搜到。瓶颈 = **搜索引导**（V_boss=hp+delta 对属性贪心 → 剪掉"先付后兑现"的延迟满足绕路）+ **quotient 抽象**（~9000 态 basin 困住）。
+- **正落到 §S39 line945 预测分支**：「加力到 1600/800k 仍卡 ATK25 上不去 → 才轮到换分坑维 / 红钥须更上游资源 / 重想段链（②已排除物量死结）」。§S39 没说错、只是乐观读法没兑现、走了它自己标的悲观岔路。
+
+#### 【交付玩家：半截 h5route（复现上次卡死·网站回放看 beam 卡在哪）】
+- `dir2_redkey_halfway_bk400.h5route`（repo 根·868B·seed=2097323316）= 玩家存档真实开局 455 步（→铁盾 MT9）+ beam 攒到 ATK25 的探索路径、停在 **MT10(11,11) ATK25/DEF23/HP592**（"最接近破门的力"=on_admit 抓的 max-(ATK,HP) 单一真实态、解码往返核验过）。**网站回放走到 grind 态停、非通关**——给玩家直观看"beam 卡死的样子"。
+- ⚠ 口径提醒：导的单一真实态 ATK25/DEF23/HP592 ≠ §S39 的 ATK25/DEF25/HP733（后者是各属性独立取的**上包络·三个不同态**、不是一条路线上的单点）；一条路线只能落一个真实态、取破门卡点 ATK 最大者。
+- **三条半截对照（锚点=on_admit 抓的 max-(ATK,HP) 单一真实态·均解码往返+独立重放核验·seed=2097323316）**：
+  - `dir2_redkey_halfway_bk400.h5route`：MT10(11,11) **ATK25**/DEF23/HP592（hit_cap）。
+  - `dir2_redkey_halfway_bk800.h5route`：MT10(10,6) **ATK25**/DEF24/HP726（saturate·budget 没用满）。
+  - `dir2_redkey_halfway_bk1600.h5route`：MT6(8,3) **ATK24**/DEF22/HP733（hit_cap·**ATK 反退**=加宽更差的铁证）。
+- `found=True` 自动导 `dir2_redkey_fromstart_*.h5route`（到红钥完整路线）——本次三 beam_k 都 found=False、**无成功件**（符合）。
+
+#### 【★下一步＝下个 session 方向（玩家拍板·2026-06-17·别现在做）】
+- **★别加距离引导（玩家否决）**：拿红钥差的**不是距离、是属性**。多 1 攻击拿红钥损血少 150+；beam 早就到门口了（9 层全铺、MT8 到达 1.4 万次）、问题是**到门破不了防 + 一路霍霍打没意义怪掉没意义血**。距离引导治错了病、删掉这条思路。
+- **★下个 session ＝ 玩家给具体 token**：玩家在网站回放半截路线、指出 beam"打没意义怪 / 开没意义门"的那一步 token → 查 **beam 为什么做无意义动作**（去没意义地方、打没意义怪损没意义血、开没意义门）。
+- **★查法 = dump 那步的排序决策**：看**什么维涨了**导致零作用动作的排序分升高。**重点查 kill / gold 伪维**（§S36 已证 kill/gold 是伪维）：若 beam 排序键里还含 kill/gold → 打怪涨 kill/gold → 排序分升高 → beam 跑去刷没意义怪。
+- **★修法 = 去掉伪维**（排序只留属性 / HP / 钥匙等真价值、剔除 kill/gold 等零兑现维）→ 接 §S40"锁死在 ~9000 态圈里反复打转"：**去掉误导维很可能就破圈**（beam 不再被假信号引去刷怪、把搜索预算花在真有用的属性绕路上）。
+- 便宜诊断 + 加力实测都交付了、三条半截 h5route（bk400/bk800/bk1600）已给玩家网站回放、**不再盲目跑更宽 beam**（k1600 已证更宽更差）。
