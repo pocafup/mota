@@ -899,8 +899,15 @@
 #### 【四、smoke 配管通过（beam_k=50 / max_states=3000）】
 found=False（预算小）但**配管全通**：到达 MT8 红钥层（maxATK23/DEF21/**HP166→394**）、7 层都到（MT3–MT9）、状态受控（distinct_fp=511/generated=3003/11 waves）、V_boss 排序键自检单调正确（高攻防高血更优）。**goal_hits=0 符合预期**：ATK 才爬到 23（刚过 22 门槛 1 点·杀 atk48 守卫×2 会损血致死）→ 需更宽 beam 把 ATK 攒更高才破门。
 
-#### 【五、正式跑 in-flight + 下一步】
-- **正式跑**：`beam_k=400 / max_states=300000`（=§S36 穷尽同预算对照）后台运行（~9min），输出 → `analysis/_dir2_beam_k400.txt`。
-- **下个 session 第一步**：读 `analysis/_dir2_beam_k400.txt`（若完整）；否则重跑 `python -u analysis/dir2_redkey_beam_probe.py --beam-k 400 --max-states 300000`。
-- **判读（两结局都是判据·报玩家）**：① found=True 走到红钥 → 有损 beam + V_boss 让 9 层中段【可处理】→ 方向2 路通、hybrid 成立（量损待对照）；② found=False → **看各层 maxATK 爬到多高**：若 ATK 爬过 ~30（能 survivable 杀 DEF22/atk48 守卫对）但仍没破门 = beam 太窄/预算不足→加宽 beam_k/加预算重试；若 ATK 卡在 23–25 上不去 = V_boss 引导下 beam 攒不动属性→红钥须更上游资源/调分坑。
-- **红线**：beam 零回归（现成钩子已守·零产品码改动）、别拿脏 V_boss（§S37 已干净）、全程中文。
+#### 【五、★正式跑结果：beam_k=400/300k 没破门，但 V_boss 把属性攒到【门槛边缘】= promising 待加力（非死）】
+- **结果**（`analysis/_dir2_beam_k400.txt`·894s）：**found=False**、hit_cap=True（300k 用满·129 waves）、goal_hits=0、distinct_fp=8123、beam_cut_total=98654、overflow_waves=0。各层【到达过】最优属性**统一 = ATK25/DEF25/HP733**（起点 ATK22/DEF20/HP166）、bestV=−220。fp_by_floor：MT9 3573 / MT7 3532 / MT8 275 / MT6 461 / MT10 96 / MT4 94 / MT3 84 / MT5 8（**9 层都铺到、含两进 boss 层 MT10**）。
+- **★判读（关键·非简单失败）**：
+  1. **V_boss 引导确实在攒属性**：ATK22→25(+3)、DEF20→25(+5)、HP166→733(+567)，9 层都铺到 → 证 V_boss 当排序键【对症】（正比攻防血、能驱动 attribute grind 穿多层）。
+  2. **卡在门槛边缘**：破门要 survivable 杀 (9,5)(11,5) 两只 yellowGuard(hp50/atk48/def22)，beam 把属性推到 ATK25/DEF25/HP733 就到预算上限、差最后 1–2 点没能破门（**精确阈值下 session 用代码验·别手算**）。
+  3. **300k 没收住**：beam_k=400 下 hit_cap=True（与 §S36 穷尽同撞 cap）→ 此宽度未让段【收敛】，是"预算用满仍差一口气"而非"轻松够不到"。
+- **⟹ 方向2 判定 = 【promising·待加力】**（既非路通、也非死）：V_boss 引导有效且逼近门槛 → 下一步该【加宽 beam + 加预算】看能否把最后 1–2 点属性攒出来破门，而非否定方向2。
+- **下个 session 第一步（按序·别颠倒）**：
+  ① **用代码（非手算）**算 ATK25/DEF25/HP733 杀 (9,5)(11,5) 守卫对的 survivable 精确阈值（还差几点属性）→ 定是"差一口气"还是"差很多"。
+  ② **加力重跑**：`python -u analysis/dir2_redkey_beam_probe.py --beam-k 800,1600 --max-states 800000`（或更大），看 maxATK 能否爬过阈值、found 翻 True、状态收没收住。
+  ③ 若加宽/加预算仍卡 ATK25 上不去 → 查这 9 层的 ATK/DEF 物品总量是否够攒到阈值（可能高属性宝石锁在红门/其他门后 = 结构性需更上游资源）→ 这才轮到"红钥须更上游 / 调分坑 / 重想段链"。
+- **红线**：beam 零回归（现成钩子·零产品码改动·已守）、别拿脏 V_boss（§S37 已干净）、全程中文、**阈值用代码别手算**（CLAUDE.md）。
