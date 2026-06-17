@@ -8,10 +8,13 @@
     则没法当稠密奖励逐状态查；若 delta(ATK,DEF) 光滑且与 HP_in 无关(只在生死线下塌)，则一张
     小网格 + 插值即可 O(1) 查询 → 框架可行。本脚本就是来量这件事的。
 
-口径：起点 = 真实存档 tok1168(刚进 MT10 打 boss 那一刻)，深拷后【只覆写 ATK/DEF/HP】，其余
-  (redKey=1 开红门必需 / 金 / 位置) 保持真实起点不动。每点跑 solver.quotient.search_quotient
-  (cross_floor=True 限{MT10,MT11}、beam_k=None 穷尽 Pareto、distinguish_doors=True 修红门 bug)，
-  取 res.final_hp(最大 HP 出口) 当 V_boss。
+口径(§S36 重扫·杀队长瞬间快照)：起点 = 真实存档 tok1168(刚进 MT10=seam(1,10) 那一刻)，深拷后
+  【只覆写 ATK/DEF/HP】，其余(redKey=1 开红门必需 / 金 / 位置) 保持真实起点不动。终点 = 首次踏入
+  队长格(6,1)=杀队长瞬间，由 seg_step(方案K)清掉 afterBattle 死后战利品 + 冻结 → 终值是纯战斗损血、
+  不含死后宝石/血瓶(旧口径 goal=MT11(6,10) 必经死后奖励区·delta(27,27) 被污染成 +226)。每点跑
+  search_quotient(cross_floor=False 单层 MT10、beam_k=None 穷尽 Pareto、distinguish_doors=True 修红门
+  bug)，取 res.final_hp(最大 HP 出口) 当 V_boss。delta(a,d)=final_hp-HP_in 含【seam→杀队长】全程
+  (8 守卫必杀开内层机关门 + 队长本身)：delta(27,27)=-634(=8守卫-330 + 队长-304)，随 a,d 升损血减(非线性)。
 
 两遍扫：
   ① 2D(ATK×DEF) @ HP=735(真实起点值)：固定 HP 量 delta=final_hp-HP_in(boss 段的"HP 税/红利"
@@ -23,8 +26,8 @@
      验证"survivable 区间内 delta 与 HP_in 无关"(若成立→V_boss(a,d,h)=h+delta(a,d) 解析可算)。
 
 只读：复用 build_initial_state/load_tokens/step/_copy_state/search_quotient，绝不改产品码。
-用法：python analysis/curriculum_scan_vboss.py [--quick] [--atk 24,27,30,33] [--def 24,27,30,33]
-      [--hp 150,200,250,300,400,600,900] [--hp2d 735] [--max-states 600000]
+用法：python analysis/curriculum_scan_vboss.py [--quick] [--atk 15,18,21,24,27] [--def 15,18,21,24,27]
+      [--hp 635,650,700,735,800,900] [--hp2d 735] [--max-states 600000]
 """
 import argparse
 import os
@@ -42,16 +45,38 @@ from sim.simulator import step, _copy_state
 from solver.quotient import search_quotient
 
 BOSS_ENTRY_TOK = 1168            # 真实存档第5次进 MT10 = 打 boss visit
-GOAL = ("MT11", 6, 10)           # 段目标：下到 MT11 出口格
-ALLOWED = {"MT10", "MT11"}       # 段内楼层；离段(回 MT9 等)裁掉
+CAPTAIN = (6, 1)                 # 队长格(MT10)；首次踏入=杀队长瞬间
+GOAL = ("MT10", 6, 1)            # §S36 口径：终点=杀队长瞬间快照(不含 afterBattle 死后战利品)
+ALLOWED = {"MT10"}               # 段内楼层；终点在 MT10、不再跨 MT11(旧口径才下 MT11 扫战利品)
 REAL = (27, 27, 735)             # 真实起点 (ATK,DEF,HP)，参照
 
 
 def seg_step(state, action):
-    """把搜索框在本段：踏出 {MT10,MT11} 的子态置 dead 裁掉。"""
+    """§S36 杀队长瞬间口径(方案K)：
+      ① 已站队长格(6,1)→任何后续动作置 dead：杜绝"杀完队长→回头扫死后战利品→再回(6,1)"把战利品折进终值。
+      ② 踏出 {MT10} 的子态置 dead 裁掉(离段)。
+      ③ 首次踏入(6,1)=杀队长瞬间：撤销 afterBattle 刚 setBlock 的死后 item(战前空·战后冒出的 item 清回 0)。
+         → _absorb 无战利品可吃、goal 记录的是【干净杀队长瞬间态】(纯战斗损血·不含死后宝石/血瓶)。
+    delta(a,d) 含【从 seam(MT10入口=1,10) 到杀队长】全程：8 守卫(6骷髅+2骷髅士兵·必杀开内层门)+ 队长本身。
+    每步 _step_impl 已 _copy_state(深拷 entities 逐行)，故就地清 ns.floor.entities 不污染 base/兄弟分支。"""
+    if state.current_floor == "MT10" and (state.hero.x, state.hero.y) == CAPTAIN:
+        ns = step(state, action)
+        ns.dead = True
+        return ns
     ns = step(state, action)
     if ns.current_floor not in ALLOWED:
         ns.dead = True
+        return ns
+    if (ns.current_floor == "MT10" and (ns.hero.x, ns.hero.y) == CAPTAIN
+            and state.current_floor == "MT10"):
+        old = state.floor.entities
+        ent = ns.floor.entities
+        tti = ns.floor._tile_to_item
+        for y in range(len(ent)):
+            row, orow = ent[y], old[y]
+            for x in range(len(row)):
+                if row[x] in tti and orow[x] == 0:   # 战前空·战后 item=afterBattle 新放→清回
+                    row[x] = 0
     return ns
 
 
@@ -78,7 +103,7 @@ def scan_point(base, atk, def_, hp, max_states):
     s = make_entry(base, atk, def_, hp)
     t0 = time.time()
     res = search_quotient(s, GOAL, seg_step, max_states=max_states,
-                          cross_floor=True, beam_k=None, distinguish_doors=True)
+                          cross_floor=False, beam_k=None, distinguish_doors=True)
     return res, time.time() - t0
 
 
@@ -88,16 +113,19 @@ def parse_ints(s):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--atk", type=str, default="24,27,30,33")
-    ap.add_argument("--def", dest="dfn", type=str, default="24,27,30,33")
-    ap.add_argument("--hp", type=str, default="150,200,250,300,400,600,900")
+    ap.add_argument("--atk", type=str, default="15,18,21,24,27",
+                    help="进场 ATK 网格(§S36 口径：一区上限=27、去 30/33 污染行)")
+    ap.add_argument("--def", dest="dfn", type=str, default="15,18,21,24,27",
+                    help="进场 DEF 网格(§S36 口径：一区上限=27、去 30/33 污染行)")
+    ap.add_argument("--hp", type=str, default="635,650,700,735,800,900",
+                    help="遍② HP 网格：新口径损≈634 才到杀队长瞬间→生死线在 ~635(HP≤634 死在半路)")
     ap.add_argument("--hp2d", type=int, default=735, help="2D 扫所用 HP(真实起点值=735；死亡剪枝保持开启=有界)")
     ap.add_argument("--max-states", type=int, default=600_000, help="单点搜索上限(安全网防失控；真实 HP 下远够)")
-    ap.add_argument("--quick", action="store_true", help="缩网格快速冒烟(atk/def=24,30 hp=300,900)")
+    ap.add_argument("--quick", action="store_true", help="缩网格快速冒烟(atk/def=24,27 hp=700,900)")
     args = ap.parse_args()
 
     if args.quick:
-        atks, defs, hps = [24, 30], [24, 30], [300, 900]
+        atks, defs, hps = [24, 27], [24, 27], [700, 900]
     else:
         atks, defs, hps = parse_ints(args.atk), parse_ints(args.dfn), parse_ints(args.hp)
 

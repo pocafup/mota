@@ -835,3 +835,72 @@
 - 遗留仍在：`seam_astar_smoke.py` 钥匙显示一行（`v.get("yellowKey")`→`v.get("key:yellowKey")`·仅显示·未修）。
 - **下个 session 第一步（玩家已定·顺序铁律·别颠倒）**：**① 先按【三''】口径重扫 V_boss（终点=杀队长瞬间·进场收窄 a,d≤27·~26min 离线）拿到干净核心资产 → 重扫后核对 delta(27,27) 应是真实损血（≈−304 那种负值）、不再是 +226（含血瓶的脏值），核对通过才算重扫对了。** ② 干净 V_boss 到手后，才上【六】方向2 小验证（用干净 V_boss 当排序 key 引导 best-first/beam 跑铁盾→红钥宽段）或方向1。**★红线：别拿脏 V_boss 验证任何方向**——V_boss 是核心资产、方向2 拿它当排序 key、方向1 retrograde 拿它当谷底锚，脏 V_boss 会污染后面一切用它的验证结果（脏则结果不可信）；重扫只 26min，先把核心资产弄干净再谈方向。
 - **方向3 中段不成立结论不受 boss 段口径/V_boss 脏净影响**（建立在红钥段 9 层/navigate 0 步/穷尽 cap 三证·独立于 V_boss 数值）。
+
+---
+
+### §S37 ★V_boss 按 §S36 口径重扫完成 → 四条核对全过、核心资产干净（2026-06-17）
+
+> 接 §S36【六】【七】顺序铁律第①步。把 §S36 拍板的"杀队长瞬间快照"口径落地到 `curriculum_scan_vboss.py`、重扫、按玩家四条判据核对。**结论：V_boss 已干净（战利品去除、进场≤27、delta=真实损血、属性非线性正确），可当核心资产上方向。** 全程未碰 `search_quotient`（beam 47 零回归）。
+
+#### 【一、口径落地（方案K·只改驱动脚本不动封板件）】
+`analysis/curriculum_scan_vboss.py` 改动：
+- **GOAL=MT11(6,10) → MT10(6,1)**（杀队长瞬间·非下楼）；**ALLOWED={MT10,MT11} → {MT10}**；**cross_floor=True → False**（单层段）。
+- **seg_step 换方案K**（三件）：① 已站队长格(6,1)→任何后续动作置 dead（杜绝杀完回头扫战利品再回）；② 踏出 {MT10} 置 dead；③ **首次踏入(6,1)=杀队长瞬间：撤销 afterBattle 刚 setBlock 的死后 item**（战前空·战后冒 item 的格清回 0）→ `_absorb` 无战利品可吃、goal 记录干净杀队长瞬间态。
+- **进场网格去污染**：默认 atk/def `24,27,30,33 → 15,18,21,24,27`（一区上限 27、去 30/33 不可达行）；遍② HP `150..900 → 635,650,700,735,800,900`（对齐新生死线~635）。
+- **机制坐实**：`quotient.py:550` goal 判定 walk 用 `step_fn`（非裸 step）→ 踏入(6,1)那步经方案K清战利品；杀队长瞬间态是 goal 旁路记录、不入 next_pts、不再扩展扫战利品。探针 `_probe_boss_kill_scratch.py` D 段（方案K）= 生产脚本逐字段一致（delta=−634/指纹211/前沿3）。
+
+#### 【二、★四条核对全过（玩家判据）】
+① **delta(27,27)=−634**（=路上8守卫−330 + 队长本身−304）：@735/@5000/@9999/遍②635–900 **全档恒 −634**。
+② 进场只到 27、无 30/33 污染行 ✓。
+③ 战利品没折进：全负值、出口 ATK27/DEF27/钥0/无血瓶宝石 ✓。
+④ delta 随 a,d 升损血递减 ✓✓（严格单调、(27,27)全表最不负）。
+**★关键澄清**：§S36 写的"≈−304"是**队长那一刀**（HP329→25·§S34）；V_boss(27,27) 真实=−634，多出的 −330 是 **seam(MT10入口1,10)→队长格(6,1) 必杀的 8 守卫**（6骷髅−30×6 + 2骷髅士兵−75×2·CLAUDE.md 埋伏范例·必杀才开内层机关门）。**−634 才是 boss 段真实总代价**、符合 §S29「V_boss 评 SEAM 到达态」（玩家拍方向1：seam 含8守卫）。−304 漏算 8 守卫。
+
+#### 【三、完整 delta(a,d) 矩阵 @充裕HP(9999·排除"血不够") + V_boss 三区结构】
+```
+  ATK\DEF   15      18      21      24      27
+   15        ✗       ✗       ✗       ✗       ✗     ← ATK=15 打不动(给9999血也过不去)
+   18      -2964   -2739   -2514   -2289   -2064
+   21      -1730   -1592   -1454   -1316   -1178
+   24      -1170   -1077    -984    -891    -798
+   27       -946    -868    -790    -712    -634
+```
+- **三区**：① **ATK≤15 打不动**（结构门槛·HP 无关·门槛 15<a≤18·未细扫16/17）；② ATK≥18 且 HP<L(a,d)→血不够死；③ ATK≥18 且 HP≥L→过、final_hp=h+delta(a,d)。
+- **delta 与 HP_in 无关**（遍②635–900 恒−634 + 三 HP 档同值）→ **V_boss(a,d,h)=h+delta(a,d) 解析成立**、小网格插值 O(1) 查、每点~2.8s → 框架可行。
+- **生死线 L(a,d)=|delta|+1**：L(27,27)=635、L(27,24)=713。**真实进场 HP≈735 下可行域几乎卡死在 (ATK27,DEF≥24)**——与 @735 遍① 只有 (27,24)(27,27) 能过**闭环**。
+- **非线性阶梯（攻防边际互相调制）**：DEF 边际每行内恒定、随 ATK 降而增大（ATK27 每+3DEF 省78 → ATK18 省225）；ATK 边际递减（DEF27 列：18→21 省886、24→27 省164）。= "攒攻防有用"的量化、攻防互相放大。
+
+#### 【四、交接 + 下一步】
+- 脚本改动已落 `curriculum_scan_vboss.py`（含头部口径文档）；结果文件 `analysis/_vboss_rescan_full.txt`(@9999全梯度)、`_vboss_rescan_clean.txt`(@735真实HP·只(27,24)(27,27)过)。探针 `_probe_boss_kill_scratch.py`/`_verify_boss_entry_scratch.py`（临时核实·可删）。
+- **下一步（玩家确认干净后）**：上 §S36【六】方向2 小验证（干净 V_boss 当 best-first 排序 key + beam 跑铁盾→红钥宽段·守 beam 47 零回归）或方向1 retrograde。**★红线（§S36）：别拿脏 V_boss 验方向——现已干净、可用。**
+- 可选补强（玩家要再做）：细扫 ATK 16/17 定精确打不动门槛；§S36 遗留 `seam_astar_smoke.py` 钥匙显示一行（`v.get("yellowKey")`→`v.get("key:yellowKey")`）未修。
+
+---
+
+### §S38 ★方向2 小验证脚本就绪 + 红钥=属性门【源码坐实】关键发现 + smoke 配管通过（正式跑 in-flight·2026-06-17）
+
+> 接 §S37 干净 V_boss。本 session 按 §S36【六】方向2：干净 V_boss 当 best-first 排序 key + beam，跑"铁盾态→红钥"**宽 9 层段**，看引导 beam 能否走到穷尽撞 cap 够不到的红钥。**核心新发现：红钥 MT8(10,2) 是 attribute-gate（铁盾态 ATK22 连守门怪 DEF22 都打不动）→ 三证根因找到。** 脚本已写并 bash 头尾核实干净、smoke 配管通过、正式跑（beam_k=400/300k）后台 in-flight。全程零产品码改动（用现成 `beam_score_fn` 钩子）→ beam 47 守卫零回归【自明】。
+
+#### 【一、工具核实（无幻觉）】
+`wc -l solver/quotient.py`=635、`grep -n "def search_quotient"`=459，与 handoff 吻合。
+
+#### 【二、★★红钥 = 属性门【源码坐实·三证根因】（MT8.json + monsters.json）】
+- **红钥格 MT8(10,2) 在小口袋**（cols 9–11 × rows 1–3），四周墙、**唯一入口 = specialDoor(85)@(10,4)**。
+- **specialDoor 开门机制**（`MT8.json` afterBattle）：杀 (9,5) 与 (11,5) 两只 **yellowGuard(221)** → 第一只 setValue flag:8+=1、第二只（flag:8 已 1）→ `openDoor [10,4]`。**杀光这对守卫才开门**（同 CLAUDE.md「机关门须清怪才开」范式）。
+- **yellowGuard 数值**（`monsters.json`）：hp=50 **atk=48 def=22** special=[]。
+- **★铁盾态 ATK=22 = 守卫 DEF=22 → `你攻 ≤ 怪防` = 打不动**（连 1 点伤害都破不了）。要破门**必须先把 ATK 攒过 22**，且能扛 2×atk48 的杀怪损血（ATK 越高连杀回合越少、损血越小）。
+- **⟹ §S36 三证（真实腿 9 层 / navigate 0 步 / 穷尽撞 cap）根因一次性解释**：红钥不是"远"、是"门后两只 DEF22 守卫，进场属性破不了防"→ 贪心 0 步（够不到）、真实腿要先绕 9 层攒 ATK/DEF/HP、穷尽在攒属性的组合空间里爆。**方向2 要验的就是：V_boss（奖励高攻防高血）引导 beam 能否跨 9 层把属性攒过这道门。** V_boss 当排序键对这个 gate 是【对症】的（它正比 ATK/DEF/HP）。
+
+#### 【三、脚本就绪 + bash 核实干净（爆日文时写的·已核实无污染）】
+- `analysis/dir2_redkey_beam_probe.py`（222 行）：bash `head -30`/`tail -30` 核实=正常 Python + 中文注释、**无日文/乱码混入**。
+- 设计（看实际代码非记忆）：① 复用 `extract_zone1_milestones` 加载、replay 到 tok454 铁盾态（MT9(9,7) HP166 ATK22 DEF20 钥黄2蓝1）；② goal=红钥 MT8(10,2)；③ ALLOWED=§S36 真实腿 **9 层 {MT1,3,4,5,6,7,8,9,10}**（宽段·非 narrow 3 层）；④ 排序键=**干净 V_boss(§S37 delta 矩阵双线性插值)**=hp+delta(atk,def)、a<18→BIG；⑤ `search_quotient(beam_score_fn=v_boss, beam_diversity="stairs", beam_k, cross_floor=True, distinguish_doors=True, on_admit=各层最优属性追踪)`。
+- **甲'三护栏齐**：① V_boss 挂**现成 `beam_score_fn` 参数**（终值可替换钩子）→ search_quotient/beam.py **一字未动 = beam 零回归自明**；② 钥匙维=beam_select protection skeleton 按当前层门数封顶硬保 + `beam_diversity="stairs"` 保 climber（⚠ 已知 gap：跨区超门数钥匙不入保护维，但本段红钥是终点、通行黄蓝钥在各层门数内、gap 大概率不咬·若咬结果偏保守=低估 beam）；③ goal_cell + allowed 均参数化（范围可配）。
+
+#### 【四、smoke 配管通过（beam_k=50 / max_states=3000）】
+found=False（预算小）但**配管全通**：到达 MT8 红钥层（maxATK23/DEF21/**HP166→394**）、7 层都到（MT3–MT9）、状态受控（distinct_fp=511/generated=3003/11 waves）、V_boss 排序键自检单调正确（高攻防高血更优）。**goal_hits=0 符合预期**：ATK 才爬到 23（刚过 22 门槛 1 点·杀 atk48 守卫×2 会损血致死）→ 需更宽 beam 把 ATK 攒更高才破门。
+
+#### 【五、正式跑 in-flight + 下一步】
+- **正式跑**：`beam_k=400 / max_states=300000`（=§S36 穷尽同预算对照）后台运行（~9min），输出 → `analysis/_dir2_beam_k400.txt`。
+- **下个 session 第一步**：读 `analysis/_dir2_beam_k400.txt`（若完整）；否则重跑 `python -u analysis/dir2_redkey_beam_probe.py --beam-k 400 --max-states 300000`。
+- **判读（两结局都是判据·报玩家）**：① found=True 走到红钥 → 有损 beam + V_boss 让 9 层中段【可处理】→ 方向2 路通、hybrid 成立（量损待对照）；② found=False → **看各层 maxATK 爬到多高**：若 ATK 爬过 ~30（能 survivable 杀 DEF22/atk48 守卫对）但仍没破门 = beam 太窄/预算不足→加宽 beam_k/加预算重试；若 ATK 卡在 23–25 上不去 = V_boss 引导下 beam 攒不动属性→红钥须更上游资源/调分坑。
+- **红线**：beam 零回归（现成钩子已守·零产品码改动）、别拿脏 V_boss（§S37 已干净）、全程中文。
