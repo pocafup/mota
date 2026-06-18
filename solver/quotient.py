@@ -229,7 +229,7 @@ def _killable(state, x, y):
     return res is not None and res.damage is not None and res.damage < h.hp
 
 
-def _boundary_ops(state, free, cross_floor=False):
+def _boundary_ops(state, free, cross_floor=False, enable_fly=False, fly_attrs=None):
     """枚举自由块边界上的付代价算子：（跨层时）走楼梯 / 杀怪 / 开钥匙门 / 撞自开假墙 / 撞触发型事件格。
     返回 [(kind, ox, oy, fx, fy, mv)]：从自由格 (fx,fy) 朝 (ox,oy) 发 mv 触发。
     cross_floor=True 时，边界上的 changeFloor 格作 stair 算子（免资源代价的跨层【免费边】，但仍真实
@@ -264,6 +264,32 @@ def _boundary_ops(state, free, cross_floor=False):
                 ops.append(("autoopen", ox, oy, fx, fy, mv)); seen_targets.add((ox, oy))
             elif e not in floor._tile_to_enemy and _live_arrive_event(floor, ox, oy):
                 ops.append(("trigger", ox, oy, fx, fy, mv)); seen_targets.add((ox, oy))
+    # fly 魔杖跨层边（方案B保守子集，仅 enable_fly 开；默认关=逐字节零回归，守 beam 封板）。
+    # 不作弊（只少不多）：gate2 = canFlyFrom[cur] ∧ canFlyTo[to]（fly_attrs 排 MT0/MT44/MT50）；
+    # hasVisitedFloor 取【精确访问】保守子集（真实引擎 §I.4.1 高索引代理只会更宽，这里故意取窄）；
+    # gate1 楼梯连通 = 当前块够到任一楼梯格(接入主链) ∧ [to..cur] 连续主链层全访问过(连通的保守
+    # 近似；未逐层实时 canConnect——动态门隔断罕见，且 fly 落点真实 step、不产作弊资源)。fly 不耗
+    # HP/不耗道具(constants)，换层走 FLOOR: token 复用引擎真实落点(§I.3.2)。塔无关：canFlyTo/From
+    # 由驱动层注入 fly_attrs，floor_ids/visited/change_floor 全读 state，无任何塔特有坐标硬编码。
+    if enable_fly and fly_attrs is not None \
+            and fly_attrs.get(state.current_floor, {}).get("canFlyFrom", True):
+        fids = state.floor_ids
+        cur = state.current_floor
+        if cur in fids:
+            cur_idx = fids.index(cur)
+            visited = state.visited_floors
+            has_stair = any(f"{fx + dx},{fy + dy}" in floor.change_floor
+                            for (fx, fy) in free for (dx, dy) in _DELTAS)
+            if has_stair:
+                for to in visited:
+                    if to == cur or to not in fids:
+                        continue
+                    if not fly_attrs.get(to, {}).get("canFlyTo", True):
+                        continue
+                    to_idx = fids.index(to)
+                    lo, hi = (to_idx, cur_idx) if to_idx < cur_idx else (cur_idx, to_idx)
+                    if all(fids[i] in visited for i in range(lo, hi + 1)):
+                        ops.append(("fly", to, None, h.x, h.y, None))
     return ops
 
 
@@ -275,6 +301,15 @@ def _expand_op(state, free, op, step_fn):
     若事件清掉了该格实体且未陷拦截态，再发同向一步真正踏入（小偷暗道：撞→开道→走入），
     与钥匙门/假墙的「开了再走入」两步一致。门已开/实体仍在/陷拦截 → 不补步。"""
     kind, ox, oy, fx, fy, mv = op
+    if kind == "fly":
+        # fly 魔杖：物品原地使用，发 FLOOR:to token 真实换层（落点/副作用由引擎处理，§I.3.2）。
+        # gate（canFlyTo/From + 访问 + 连通）已在 _boundary_ops 把关，此处只执行换层；
+        # 换层未发生（目标层未加载等）→ current_floor 不变 → 无边（返 None）。
+        to_id = ox
+        s = step_fn(state, f"FLOOR:{to_id}")
+        if s.dead or s.current_floor == state.current_floor:
+            return None
+        return s, [f"FLOOR:{to_id}"]
     walk = _bfs_moves(state, free, (fx, fy))
     if walk is None:
         return None
@@ -459,7 +494,7 @@ def _beam_truncate_wave(next_pts, beam_k, st, wave_idx, sink, future=None, diver
 def search_quotient(entry_state, goal_cell, step_fn, max_states=2_000_000, cross_floor=False,
                     beam_k=None, beam_cut_sink=None, on_admit=None, beam_future=None,
                     beam_diversity=None, beam_score_fn=None, allow_purchase=False,
-                    beam_score_extra=None, distinguish_doors=False):
+                    beam_score_extra=None, distinguish_doors=False, enable_fly=False, fly_attrs=None):
     """块图搜索：从 entry_state 出发，停在 goal_cell 且出口价值 Pareto 最优。
     输出契约对齐 solver.search.search_segment（found/goal_frontier/goal_frontier_actions/统计）。
     cross_floor=False（默认，phase1 段内）：任何离层子态裁掉（跨层由 phase1 forced 骨架处理）。
@@ -498,8 +533,18 @@ def search_quotient(entry_state, goal_cell, step_fn, max_states=2_000_000, cross
       这是补【购买能力】、非加估值项；intercept_locs 两路都照记（开时=买过的点也留痕，便于审计）。
     distinguish_doors（默认 False）：是否把「当前层仍关着的门格集合」并入商图身份维（_qfp）。False
       （默认）→ 指纹与历史逐字段一致、beam 字节零回归；True → 修『红门支配 bug』（开门落惰性事件格时
-      开门态被未开门态 Pareto 支配剪掉、boss 真起点搜不通），仅课程学习路开启。详见 _qfp 注释。"""
+      开门态被未开门态 Pareto 支配剪掉、boss 真起点搜不通），仅课程学习路开启。详见 _qfp 注释。
+    enable_fly（默认 False）：是否启用 fly 魔杖跨层边（方案B保守子集，见 _boundary_ops fly 分支注释）。
+      False（默认）→ 不生成任何 fly 算子、与历史逐字节一致（守 beam 封板，仅方向2开）；True → 生成
+      "当前块够到楼梯 ∧ 精确访问过 ∧ canFlyTo/From 允许（fly_attrs 排 MT0/MT44/MT50）∧ [to..cur] 主链
+      连续访问"的 fly 边，真实 step FLOOR: token 换层（不耗 HP/道具）。须同时传 fly_attrs，否则报错。
+    fly_attrs（dict 或 None）：{floor_id: {canFlyTo, canFlyFrom}}，由驱动层从 data/<塔>/fly_attrs.json
+      注入（塔无关）。enable_fly=True 时必给；enable_fly=False 时忽略。"""
     goal_floor, gx, gy = goal_cell
+    if enable_fly and fly_attrs is None:
+        raise ValueError(
+            "enable_fly=True 须提供 fly_attrs（canFlyTo/canFlyFrom 表）；"
+            "缺表则默认 True 兜底会作弊飞入 MT0/MT44/MT50（隐藏层/结局层）")
 
     if beam_diversity is None:
         div_fn = None
@@ -560,7 +605,7 @@ def search_quotient(entry_state, goal_cell, step_fn, max_states=2_000_000, cross
                         st.goal_hits += 1
 
             # 枚举付代价算子，逐个展开推进
-            ops = _boundary_ops(state, free, cross_floor)
+            ops = _boundary_ops(state, free, cross_floor, enable_fly, fly_attrs)
             n_ops_total += len(ops)
             for op in ops:
                 res = _expand_op(state, free, op, step_fn)
@@ -577,8 +622,9 @@ def search_quotient(entry_state, goal_cell, step_fn, max_states=2_000_000, cross
                     resolved = [(child, op_moves)]
                 for rchild, rmoves in resolved:
                     if rchild.current_floor != state.current_floor:
-                        # 离层子态：单层版一律裁掉；跨层版只放行楼梯边，事件传送(重置/结局/门禁传送)排除
-                        if not cross_floor or op[0] != "stair":
+                        # 离层子态：单层版裁掉；跨层版放行楼梯边；fly 边(enable_fly)独立放行(不依赖
+                        # cross_floor)；事件传送(MT3重置/MT40/MT24结局/门禁传送)仍排除
+                        if not (op[0] == "fly" or (cross_floor and op[0] == "stair")):
                             continue
                     rchild, abs_moves = _absorb(rchild, step_fn)
                     if rchild.dead:

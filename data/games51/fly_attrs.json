@@ -1,0 +1,9 @@
+{
+  "_comment": "fly魔杖(item:fly, cls=constants永久)飞行属性 canFlyTo/canFlyFrom，gate2 用(§I.3 core.flyTo)。来源: docs/mechanics_51.md §I.5.1（浏览器引擎全塔枚举）+ data/games51/floors/MT0.json(显式字段)/MT44.json(_isHide_note 注明 canFlyTo=false,canFlyFrom=true)。canFlyTo=false 仅 MT0/MT44/MT50；canFlyFrom=false 仅 MT50。未列楼层默认两者 true（MT1-MT43、MT45-MT49 普通层）。本表由驱动层读取后注入 solver.search_quotient(fly_attrs=...)；solver 塔无关、用 fly_attrs.get(fid,{}).get('canFlyTo',True) 兜底，不改 sim._execute_floor_fly（后者仍供真实 route 重放）。",
+  "_default": {"canFlyTo": true, "canFlyFrom": true},
+  "floors": {
+    "MT0":  {"canFlyTo": false, "canFlyFrom": true,  "_note": "地下室;不可飞入(只能从MT1走楼梯/downFly),可飞出。MT0.json 已有显式字段。"},
+    "MT44": {"canFlyTo": false, "canFlyFrom": true,  "_note": "隐藏层isHide;楼梯到不了(只能upFly/downFly进),不可fly魔杖飞入,可飞出。MT44.json _isHide_note 坐实。"},
+    "MT50": {"canFlyTo": false, "canFlyFrom": false, "_note": "顶层/结局层;既不可飞入也不可飞出,唯一入口=MT24(6,2)事件传送。§I.5.1。"}
+  }
+}
