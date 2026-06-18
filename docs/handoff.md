@@ -1024,3 +1024,31 @@ found=False（预算小）但**配管全通**：到达 MT8 红钥层（maxATK23/
 #### 【★状态数/分段（玩家问·先跑再决定）】
 - **先跑 path-loss 看 beam 走不走出 basin、再决定分不分段。** §S35 状态爆炸是**穷尽模式**；现在有损 beam(k=400) 靠截断控状态、§S40 证卡住是**引导问题非宽度**。修的正是引导（属性值钱·beam 走出 basin）。修对了状态还是 beam_k 控制（不爆）、只是搜对方向。**先看引导修对没、别现在为状态数/分段操心。**
 - 本 session 两只只读探针入库：`dir2_redkey_bloodcost_dump.py`（排序决策 dump）、`dir2_redkey_pathloss_probe.py`（Φ_path 可行性·612 梯度）。未碰封板件。
+
+---
+
+### §S42 ★path-loss k=400 实测落定 + 路线 h5route 交付 + 蓝钥审计(2026-06-18)
+
+**§S41 path-loss 方案第1点已执行**（`analysis/dir2_redkey_pathloss_beam.py` k=400 / max_states=300k / 810.7s / hit_cap=True）。
+
+#### 【三点判定（对照 §S40 基线 found=False / ATK25 / distinct_fp~8123）】
+- ① **没走出 basin / 没先攒属性**：maxATK 各层全卡 25（=§S40）、distinct_fp=8313（≈§S40 的 8123·探索面没扩）、各层最优态 bestV 全同 −3065。
+- ② **没破红钥**：found=False·到 MT8（maxATK25/DEF26/HP658）但没踏进红钥格 (10,2)。
+- ③ **还囤血**：HP 起点 166→658。
+
+#### 【★关键：path-loss 不是没接上 + 病根再重定位】
+- **score_fn 确接上**：各层 bestV=−3065 正是排序键 `hp−Φ_total(25,~25)`（Φ≈3700）的值 → 证明在驱动 beam、确实偏好高属性（非退回 §S40 的 hp+delta）。Φ 自检干净：剩余怪集 **85 只**（非 §S41 写的 112=含已杀 27·85=铁盾态真·剩余路径口径）/ 全无 special / ΔΦ(+1ATK@25→26)=584、ΔΦ(+1DEF)=186（复现 §S41 的 612/204）。
+- **§S42 重定位（部分推翻 §S41 前提）**：§S41 假设"引导偏好血 vs 属性"，但 path-loss 正确接上、属性值回 584(>血400)、beam 仍卡 ATK25。真因 = **段内（不破红钥门）属性供给天花板 = ATK25**（最优态全钉 ATK25/DEF26）。ATK 见顶后唯一抬 score 的是 hp（Φ 固定）→ beam **理性**拿血到 658（非引导坏）。且 **ATK25 已 > 红钥门两守卫 def22**（§S36 属性门）→ 属性层面可能已够破门、卡在没导航到 MT8(10,2) 小口袋。
+
+#### 【★蓝钥审计（玩家猜测·`analysis/_pathloss_route_audit.py` 只读重放 h5route）】
+- **三重核验全过**（① 解码往返 ② 确定性复现 ③ 重放终态=锚点 MT9(9,9) ATK25/DEF25/HP584）。
+- **蓝钥全账**：开局 0 → 捡 2 把（MT3(5,3) tok72 / MT4(2,1) tok820）→ 用 2 把 → 终态 0。消耗点：**① tok#469 @ MT9(6,2) 开蓝门**（= 精确命中玩家说的 tok469）；② tok#1322 @ MT8(2,11) 开蓝门。黄钥全程充裕（终态剩 2）→ 瓶颈是蓝钥非黄钥。
+- **印证 vs 待回放**：✅ 源码级坐实 beam 在 MT9(6,2) tok469 用稀缺蓝钥开门（呼应 §S40 tok469 线索）；⚠ 比猜测更细——beam 又捡第 2 把用在 MT8(2,11)，所以是"2 把蓝钥被 MT9 + MT8(2,11) 吃光、无余量"，非"MT8 一把都没有"。
+
+#### 【★下个 session（玩家明早做·睡前看 h5route 验猜测）】
+1. **玩家网站回放 `dir2_redkey_pathloss_halfway_bk400.h5route`**（已 present 给玩家）验两件（按 CLAUDE.md 铁律·我不推演地图）：(a) MT9(6,2) 那门是否真能用两黄从旁绕过；(b) MT8「一攻一防」在哪个蓝门后、是否因蓝钥用完（MT9 浪费 + MT8(2,11) 用掉）才拿不到。
+2. **若 (a)(b) 成立 → 卡 ATK25 真因 = 钥匙稀缺**（蓝钥别浪费 MT9·用两黄替代），下一步修钥匙稀缺（§S41 第2阶段：源码 1蓝≈5黄 折价·`door_value.py` 折 HP 当量），**而非甲/乙两核查**。
+3. **若不成立 → 走 §S42 甲/乙**：甲 = dump beam 在 MT8 守卫格 (9,5)/(11,5)/specialDoor(10,4) 的属性+动作（区分属性天花板 vs 导航）；乙 = 查段内 ATK 源上限确认 25 是否硬天花板。
+4. 玩家可能跑 800k/1600，或先修钥匙稀缺。
+
+**本 session 新增/改动文件**：`analysis/dir2_redkey_pathloss_beam.py`（path-loss 探针·零产品码改动）、`analysis/_pathloss_route_audit.py`（路线审计·三重核验+蓝钥追踪）、`analysis/_phi_probe_scratch.py`（Φ 口径探查·可弃）、`dir2_redkey_pathloss_halfway_bk400.h5route` + `..._bk50.h5route`（交付/烟测路线）、`analysis/_dir2_pathloss_k400.txt`（跑结果）。memory：`project_dir2_pathloss_fix.md` + `MEMORY.md` 加 §S42。**产品码（sim/solver）零改动**。
