@@ -1052,3 +1052,110 @@ found=False（预算小）但**配管全通**：到达 MT8 红钥层（maxATK23/
 4. 玩家可能跑 800k/1600，或先修钥匙稀缺。
 
 **本 session 新增/改动文件**：`analysis/dir2_redkey_pathloss_beam.py`（path-loss 探针·零产品码改动）、`analysis/_pathloss_route_audit.py`（路线审计·三重核验+蓝钥追踪）、`analysis/_phi_probe_scratch.py`（Φ 口径探查·可弃）、`dir2_redkey_pathloss_halfway_bk400.h5route` + `..._bk50.h5route`（交付/烟测路线）、`analysis/_dir2_pathloss_k400.txt`（跑结果）。memory：`project_dir2_pathloss_fix.md` + `MEMORY.md` 加 §S42。**产品码（sim/solver）零改动**。
+
+---
+
+### §S47 ★retrograde V 扩展性实测：红钥全段(9层)穷尽 (d) 落定 = 没爆内存但撞 cap + goal-capable=0 + V[start]=−inf → (d) 不可行·必转 (b)（2026-06-18）
+
+> 接 §S46（route_aware 主线·轴 b→d·见 memory `project_route_aware_value_axis`；handoff 缺 §S43–S46 段、内容在 memory + commit `3099334`）。玩家裁定：retrograde V 要对**整一区 MT1-10 全 9 层**算（不切两层小段·局部出不了优秀解·retrograde V 本质=全局考虑），**串行单跑**红钥全段看 (d) 穷尽爆不爆（上次爆=并行 3 个 + 操作电脑挤爆+黑屏·非算法必爆）。本 session 串行单进程、detached、结果写文件、无人值守。工具自检正常（`wc -l quotient.py`=681 / `grep "def search_quotient"`=494）。
+
+#### 【跑法】
+`python -u analysis/seg_retrograde_v_scale.py --segment redkey --skip-beam`（新增 `--skip-beam`=只阶段1+2、跳 beam 对照）·串行单进程·max_states=2M·fly 关·写 `analysis/_redkey_fullseg_v_scale.txt`。段=REAL_LEG_FLOORS 9 层 [MT1,3,4,5,6,7,8,9,10]·起点铁盾 MT9(9,7) HP166/ATK22/DEF20·goal 红钥 MT8(10,2)。
+
+#### 【实测（66min·结果文件坐实）】
+- **阶段1 前向穷尽**：3944.8s·节点=522272·边=1510163·distinct_fp=22949·生成=**2,000,003 撞 2M cap·hit_cap=True**。
+- **各层节点分布**：**MT7=369145（占 70%!）**/MT9=67134/MT6=45325/MT8 仅 15378/MT4=12800/MT3=7009/MT5=5374/MT10 仅 107。
+- **★goal-capable 节点数=0**：2M 个穷尽态**没有一个够到红钥 MT8(10,2)**。
+- **阶段2 后向**：32.9s·pops=0·**V[start]=−inf·出口 max-hp=None**（无 goal 出口·传播无源）。
+- **内存**：私有 24.3GB / 物理 10.9GB·CPU 3485s·**无 MemoryError**（串行扛住·吃页面文件 swap）。
+
+#### 【三条定论】
+1. **没爆内存 = 证实玩家判断**：上次 MemoryError 是并行 3 个 + 操作电脑（chrome/任务管理器）挤爆+黑屏·**非算法必爆**。串行单跑扛住了，但代价 = 私有 24GB（贴近物理极限·吃 swap）。
+2. **★(d) 穷尽 9 层不可行**：hit_cap 撞 2M cap + V 不完整 + goal-capable=0 + V[start]=−inf。**不是内存爆·是状态爆炸**——MT7 吃掉 70% 节点（组合爆炸）、2M 预算耗在 MT7、深入不到能拿红钥的态。与 §S36「红钥腿需 9 层密集交错回访·穷尽必爆」一致。要够到红钥需远超 2M → 那才必爆内存。
+3. **诚实保留**：goal-capable=0 在撞 cap 下测（预算掩盖）·**不证红钥在 9 层绝对不可达**；但足证 **2M 穷尽预算内够不到 + (d) 代价不现实**。
+
+#### 【★结论/下步】
+**必转 (b) 近似全局 V**：仍对整一区 MT1-10 算（**不违背全局性**·爆掉的是"穷尽每个状态"非"全局性"）、但不穷尽——更粗状态抽象 / 更聪明的 Φ 近似整一区剩余价值·避开 MT7 组合爆炸·省内存。(b) 的具体设计 = 下个 session 拍。
+
+**本 session 新增/改动文件**：`analysis/seg_retrograde_v_scale.py`（+`--skip-beam`·analysis 探针）、`analysis/seam_retrograde_v_probe.py`（§S46 retrograde V 库·前向枚举+后向传播）、`analysis/_fly_landing_check.py`、`analysis/_redkey_fullseg_v_scale.txt`/`.err`（跑结果）。memory：`feedback_global_v_no_split.md` + `project_route_aware_value_axis` 更新 + `MEMORY.md` 加 §S47。**产品码（sim/solver）零改动**。
+
+---
+
+### §S48 ★fly 去重核实：玩家担忧"fly 无代价来回飞→冗余吃光预算→MT7 爆炸"——机制方向对、但冗余被指纹去重·MT7 与 fly 无关（2026-06-19）
+
+> 接 §S47（(d) 穷尽红钥全段不可行·MT7 吃 70% 节点·必转 (b)）。玩家担心：fly 不耗血/道具/步数，若去重不对会 MT9⇄MT7 来回飞产生冗余态、把 2M 预算吃光 → MT7 的 70% 可能是 fly 飞行交叉冗余而非 MT7 怪多门多。本 session **只读核实**·工具自检正常（`wc -l solver/quotient.py`=681 / `search_quotient`@494）。
+
+#### 【核实1：指纹够不够识别来回飞——够】
+- 身份维 `_qfp`(quotient.py:405) = (当前层, 自由块[剔楼梯格]frozenset, flags, auto/dead/won)[+可选关门集]。
+- 价值维 `value_vector`=`_value_map`(search.py:60) = {hp,atk,def,mdef,gold,kill_count, key:*, item:*}·**无步数维**。
+- fly 不耗 HP/道具/步数·不杀怪·不拿金（`_expand_op` fly 分支只发 `FLOOR:` token·quotient.py:304）。
+- ⇒ MT9→MT7→飞回MT9：回原层/同连通块/flags收敛(firstArrive只触发一次)/资源全不变 → 指纹+价值向量全同 → visited Pareto 剪掉。落点态按(目标层+自由块+flags)合并·不因来源分裂。**指纹够用·来回飞不产虚高 distinct 态。**
+
+#### 【核实2：fly 关 vs 开硬数据对比（重跑·redkey 9层·10万预算·都撞cap·skip-beam·`_fly_cmp_off/on_100k.txt`）】
+| 指标 | fly 关 | fly 开 |
+|---|---|---|
+| 生成(撞cap) | 100002 | 100000 |
+| distinct_fp | 4542 | **2462 (↓46%)** |
+| 节点 | 34358 | 19533 (↓43%) |
+| 图边 | 77946 | 37558 (↓52%) |
+| MT7 节点 | 21618 (**62.9%**) | 7307 (**37.4%**) |
+| goal-capable | 0 | 0 |
+| V[start] | −inf | −inf |
+- ★fly 开 distinct_fp **不升反降**(4542→2462) → 若 fly 制造虚高态它该暴涨·实测反降=**指纹把来回飞冗余去重了**。
+- ★与 §S45 方向2 beam 场景一致（fly 开 distinct_fp 8313→3342 也降·见 memory `project_dir2_redkey_attribute_wall`）=跨场景印证"fly 稀释预算"。
+- MT7=62.9%(fly关)→fly 开反降 37.4% & 绝对数 21618→7307。**MT7 爆炸在 fly 关时就有=与 fly 无关。**
+
+#### 【核实3：2M 全量 fly 关坐实 MT7=70.7%】
+- `_redkey_fullseg_v_scale.txt` 表头 `fly=关`·MT7=369145 占 522272 节点 70.7%。10万(62.9%)→2M(70.7%)同趋势·MT7 始终主导·与预算无关。
+
+#### 【★定论】
+1. **指纹够用·不必修 fly 去重**：指纹已最强去重(同层同块同flags同资源即合并)·来回飞被剪·distinct 不升反降·无从"加"去重。
+2. **MT7 爆炸=MT7 自身组合爆炸·与 fly 无关**：fly 关/开 MT7 都主导·goal-capable 都=0。
+3. **fly 在穷尽(d)净负**：每态多~8条fly边(MT9实测飞MT1-8·`_fly_landing_check.py`)·大量"生成又去重"烧预算→同预算探索更浅(distinct↓46%)·更够不到红钥→默认 OFF 正确。
+4. **(d) 必转 (b) 结论不变**：根因 MT7 组合爆炸·fly 不是因也不是解。
+- **玩家直觉评估**：✓对=fly 确实制造大量冗余生成、吃预算；✗修正=①冗余被指纹去重(distinct↓不升)·非虚高态 ②MT7 70% 是 fly 关时的爆炸 ③fly 开状态没爆(distinct更少)·只是探索更浅。
+
+**本 session 文件**：`analysis/_fly_cmp_off_100k.txt`/`_fly_cmp_on_100k.txt`(对比跑·重跑覆盖了 §S47 那批 MemoryError 截断的 `_scale_redkey_flyon/off.txt`)·复用 `analysis/_fly_landing_check.py`。memory：`project_dir2_redkey_attribute_wall` 补穷尽场景一致。**产品码零改动·beam 零回归。**
+
+---
+
+### §S49 ★MT7 爆炸维度诊断 → (b) 怎么做的定论：正路=可采纳界分支定界(非 top-k 摘要)；拍板 Lever A 死维只读验证 + Lever B 主菜展开设计（2026-06-19）
+
+> 接 §S47/§S48：(d) 穷尽 9 层不可行(MT7 主导·goal=0·V=−inf)、fly 与 MT7 爆炸无关 → 必转 (b)。玩家提出 (b) 方向3「分层摘要」=每层记录最高价值的几个点排序成摘要、只有到当前层才展开。本 session **只读诊断 + 设计评估**，分解 MT7 爆炸维度、评估 top-k 摘要是否丢最优、拍板正路。工具自检正常(`wc -l solver/quotient.py`=681 / `search_quotient`@494)。
+
+#### 【诊断数据】`analysis/_mt7_explosion_diag.py`（只读·复用 forward_enumerate+redkey 配置·`_mt7_diag_300k.txt`·470s·max_states=300k·hit_cap）
+口径澄清（消除与 §S47 数字打架）：§S47/§S48 的「各层指纹 MT7=369145(70%)」其实是 **节点数(fp×vec)**——`seg_retrograde_v_scale.py` 把 `Counter(fp[0] for (fp,vkey) in node_id)` 误标成「指纹」。**真 distinct_fp = `len(visited)`**。本诊断用 `Counter(fp[0] for fp in visited)` 是**真指纹**：
+```
+每层:  指纹数   节点(fp×vec)  厚度       (300k·总distinct_fp=9416)
+MT7:   6262     26526        4.2   ← 指纹占全段 66.5%(6262/9416)·主导
+MT9:   2402      5795        2.4
+MT6:    348      2138        6.1
+MT8:    327      1423        4.4
+MT5:      8       181       22.6
+```
+MT7 各价值维 distinct 取值：`hp:224种[2..468]` `gold:32种[67..99]` `key:yellowKey:10种[0..9]` `kill:7种[28..34]` `atk:2种[22..23]` `def:2种[20..21]` `key:blueKey:2种` 其余(mdef/item:fly/I333/book/wand)=1。
+
+#### 【判读1：MT7 爆炸=指纹(层内进度)主导，非厚度】
+MT7 = **6262 指纹 × 4.2 厚度**，两因子量级差三个数量级。**爆炸压倒性来自 6262 个不同进度态**（不同杀怪/开门子集→不同 free_block→不同下游可达性），厚度 4.2（同进度的价值变体）次要。
+
+#### 【判读2：玩家 top-k「分层摘要」攻错因子 + 对 MT7 致命】
+- "每层挑价值最高的几个点"压的是**厚度**（同进度价值变体），可 MT7 爆炸在**指纹**（6262 不同进度）。
+- 不同指纹不是"价值变体"、是**不同进度→不同下游可达性**，按当前价值 top-k 排序砍掉它们 = **beam 截断 = lossy**（鸡生蛋根本性：没展开下游就排序=只能用启发式=beam）。
+- ★**对 MT7 格外致命**：红钥路线那个"**故意烧血换进度**"的指纹（玩家一直坚持的策略），按当前 hp/价值排很可能排不进 top-k、正好被砍。**诊断坐实 top-k 在 MT7 必丢红钥那类解。**
+
+#### 【判读3：正路=可采纳界分支定界(branch-and-bound+抽象启发式)=玩家"到当前层才展开"直觉的正确实现】
+先在便宜松弛问题（忽略钥匙约束 / 逐层独立解）算每进度态的**可采纳上界 U≥V**，前向枚举时凡 `U(node) ≤ 当前已找到的最好下界` 就剪。
+- **无损**（界可采纳就绝不剪掉最优）、直接砍那 6262 个**注定次优**的进度态。
+- 玩家"别处只留摘要、到了才细看"的内核 = **抽象层先给指引(上界)·细节按需展开** = branch-and-bound + 抽象启发式，**不是**存 top-k 价值点。这正是 **A* 核心(admissible heuristic)** + §S31 算法选型早提的方向，比精确算 V 便宜、比 top-k 安全(无损)。
+
+#### 【玩家拍板（三决策）】
+1. **Lever A（删 gold+kill 死维）= 先做、便宜无损验证**：`gold` 确凿死维（段内无商店·`forward_enumerate` 第117行 `child.floor._event_intercepting: continue`=`allow_purchase=False·§S35`），`kill` 几乎肯定死（已体现在 hp/atk·不 gate 门）。删了估计把 MT7 厚度 4.2 砍到 ~2(约 2×)。**单独不够**（治不了 6262 指纹主因·指纹不含 gold/kill）、顺手无损收益。**只读对照验证**（去掉俩维重跑 `_ge_all` 看砍多少·不碰产品码）。
+2. **Lever B（可采纳界分支定界）= 主菜、先展开设计别实现**：唯一对得上主因(6262 指纹)的**无损**路。核心工作量 = 设计便宜且可采纳的上界 U（松弛问题选型）。展开设计：松弛问题选什么(忽略钥匙/逐层独立/别的)、怎么算 U≥V、怎么保证可采纳(绝不低估真 V 否则剪掉最优)、上界紧度(太松剪不掉多少)。**先设计玩家看了再拍实现。**
+3. **兜底（更聪明 Φ 近似）= 留着、Lever B 界做不紧再说**：退到路线感知近似 Φ（接受近似但不路线盲）。现在不用。
+
+#### 【★下个 session 第一步】
+1. **Lever A 只读验证**：去掉 gold+kill 维重跑 `_ge_all`、看 MT7 厚度从 4.2 砍到多少、确认无损（不碰产品码）。
+2. **Lever B 展开设计（先别实现）**：松弛问题选型(忽略钥匙/逐层独立/别的)、怎么算可采纳上界 U≥V、怎么保证可采纳、上界紧度评估。给设计玩家确认再实现。
+- ★**仍保全局性**（玩家坚持·见 [[global-v-no-split]]）：可采纳上界是**整一区 MT1-10 视角**、剪枝无损不丢全局最优、别变局部。
+
+**本 session 文件**：`analysis/_mt7_explosion_diag.py`(只读诊断)·`_mt7_diag_300k.txt`(输出)。memory：更新 `project-route-aware-value-axis`((b) 定论=分支定界)。**产品码零改动·beam 零回归。**
