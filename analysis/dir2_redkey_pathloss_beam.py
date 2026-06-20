@@ -33,6 +33,7 @@
       [--allowed MT1,...] [--diversity stairs] [--phi-only]（仅 dump Φ 自检不跑 beam）
 """
 import argparse
+import json
 import os
 import sys
 import time
@@ -51,7 +52,10 @@ from analysis.extract_zone1_milestones import build_initial_state, load_tokens
 from sim.simulator import step, _load_floor_if_needed, _build_monster
 from sim.combat import compute_combat, PlayerState
 from solver.quotient import search_quotient
+from solver.search import _gives_hp_on_pickup
 from extract.encode_route import write_h5route
+
+_ITEM_DB = json.loads((ROOT / "data" / "games51" / "items.json").read_text(encoding="utf-8"))
 
 TOK_SHIELD = 454               # 铁盾刚到手 MT9(9,7) HP166 ATK22 DEF20 钥黄2蓝1（§S36 坐实）
 REDKEY_CELL = ("MT8", 10, 2)   # 一区唯一红钥（tok945 到手）= 本段 goal
@@ -109,6 +113,38 @@ def build_phi_table(start, floors):
 
 def phi_total(atk, def_, table):
     return table[(_clamp(atk, A_LO, A_HI), _clamp(def_, D_LO, D_HI))]
+
+
+def enumerate_potions(start, floors):
+    """段内血瓶格全集：[(floor,x,y,hp)]。HP 当量引擎实算·读 items.json·零魔法数
+    （pickup 给 hp 的道具=红/蓝瓶·_gives_hp_on_pickup 数据驱动判定·ratio 缩放跟 floor.ratio）。"""
+    out = []
+    for f in floors:
+        if not _load_floor_if_needed(start, f):
+            continue
+        fl = start.floors[f]
+        for y in range(len(fl.entities)):
+            for x in range(len(fl.entities[y])):
+                iid = fl._tile_to_item.get(fl.entities[y][x])
+                if iid and _gives_hp_on_pickup(_ITEM_DB.get(iid)):
+                    eff = _ITEM_DB[iid]["pickup"]
+                    base = eff.get("base", eff.get("delta", 0))
+                    hp = base * fl.ratio if eff.get("ratio_scaled") else base
+                    out.append((f, x, y, hp))
+    return out
+
+
+def potion_bank(state, potions):
+    """位置盲血瓶银行项：Σ【未收】血瓶 HP（该格 entities 仍是瓶 tile != 0；未 load 层=当作还在）。
+    §S52 诊断坐实 equiv_hp/path-loss Φ 对【地图银行着的血瓶 HP】盲 → 加此项让 beam 看到未收瓶。
+    位置盲（非距离·非可达·只数瓶值）= 守红线（玩家否决距离引导）·O(#瓶) 极便宜。
+    ⚠数学性质：hp+bank 在拿瓶时不变（拿瓶 hp+=v、bank-=v）→ =起点hp+总瓶−已损 = 按【最小化总损血】排序。"""
+    g = 0.0
+    for (f, x, y, hp) in potions:
+        fl = state.floors.get(f)
+        if fl is None or fl.entities[y][x] != 0:
+            g += hp
+    return g
 
 
 def make_seg_step(allowed):
@@ -198,13 +234,20 @@ def export_halfway_h5route(best_acts, tag):
     return out_path
 
 
-def run_one(start, goal, allowed, beam_k, max_states, diversity, table):
-    """跑一次 path-loss 引导段搜索 + 各层进度统计。返回 res。"""
+def run_one(start, goal, allowed, beam_k, max_states, diversity, table, potions=None):
+    """跑一次 path-loss 引导段搜索 + 各层进度统计。返回 res。
+    potions=None → §S42 基线 hp−Φ（字节级不变·零回归）；
+    potions=[...] → hp + 银行项 − Φ（让 beam 看到地图未收血瓶 HP）。"""
     seg_step = make_seg_step(allowed)
 
-    def score_fn(state):
-        h = state.hero
-        return h.hp - phi_total(h.atk, h.def_, table)
+    if potions is None:
+        def score_fn(state):
+            h = state.hero
+            return h.hp - phi_total(h.atk, h.def_, table)
+    else:
+        def score_fn(state):
+            h = state.hero
+            return h.hp + potion_bank(state, potions) - phi_total(h.atk, h.def_, table)
 
     best = defaultdict(lambda: {"atk": 0, "def": 0, "hp": 0, "V": -10**18, "n": 0})
     best_acts = {"key": (-1, -1), "acts": None, "snap": None}
@@ -260,6 +303,32 @@ def dump_phi_selfcheck(table, roster, mons, mdef):
     print(f" ΔΦ(+1DEF @DEF24→25,ATK25) = {dd}（探查=186）")
 
 
+def report_res(res, bk, tag, export_tag):
+    """打印一组 beam 结果 + 各层进度 + 导 h5route。tag=对照标签·export_tag=文件名后缀。"""
+    print(f"\n  ── [{tag}] ──")
+    print(f"  found={res.found}  耗时={res._secs:.1f}s  hit_cap={res.hit_cap}")
+    print(f"  distinct_fp={res.distinct_fingerprints}  expanded={res.states_expanded} "
+          f"generated={res.states_generated}  waves={res.n_waves}")
+    print(f"  goal_hits={res.goal_hits}  前沿={len(res.goal_frontier)}  "
+          f"beam_cut_total={res.beam_cut_total}  overflow_waves={res.beam_overflow_waves}")
+    print(f"  fp_by_floor={dict(res.fp_by_floor)}")
+    print("\n  ── 各层【到达过】最优属性（on_admit·看 beam 把队伍推到哪）──")
+    for f in sorted(res._best_by_floor, key=lambda x: int(x[2:])):
+        b = res._best_by_floor[f]
+        print(f"    {f:>5}: n={b['n']:>6}  maxATK={b['atk']}  maxDEF={b['def']}  "
+              f"maxHP={b['hp']}  bestV={b['V']:>10.0f}")
+    if res.found:
+        print(f"\n  ★ 走到红钥！max-HP 出口 HP={res.final_hp}")
+        print("  ⟹ path-loss 引导让 9 层中段【可处理】→ 方向2 路通（量损待对照）。")
+        export_h5route(res, export_tag)
+    else:
+        mt8 = res._best_by_floor.get("MT8")
+        reach8 = f"到过 MT8(maxATK{mt8['atk']}/DEF{mt8['def']}/HP{mt8['hp']})" if mt8 else "没到过 MT8"
+        print(f"\n  ✗ 没走到红钥（{reach8}）。hit_cap={res.hit_cap}")
+        print("  ⟹ 看各层 maxATK 有没有从 §S40 卡的 24-25 往上攒（思路扭过来的直接信号）。")
+        export_halfway_h5route(res._best_acts, export_tag)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--beam-k", type=str, default="400", help="beam 上限（逗号分隔=扫多个）")
@@ -270,6 +339,8 @@ def main():
     ap.add_argument("--diversity", type=str, default="stairs",
                     choices=["none", "floor", "stairs"], help="beam 分坑保护维")
     ap.add_argument("--phi-only", action="store_true", help="仅 dump Φ 自检不跑 beam")
+    ap.add_argument("--potion-bank", action="store_true",
+                    help="§S52：每 beam_k 多跑一组 hp+地图血瓶银行项−Φ（对照基线·让 beam 看到未收瓶 HP）")
     args = ap.parse_args()
 
     allowed = [f.strip() for f in args.allowed.split(",") if f.strip()]
@@ -296,32 +367,29 @@ def main():
         print("\n--phi-only：仅 dump Φ 自检，不跑 beam。")
         return
 
+    potions = enumerate_potions(start, allowed) if args.potion_bank else None
+    if potions is not None:
+        tot = sum(p[3] for p in potions)
+        print(f"\n 血瓶银行项 ON（§S52）：段内未收血瓶 {len(potions)} 瓶 总HP当量={tot:.0f}"
+              f"（位置盲·引擎实算·读 items.json）")
+        print("   ⚠ hp+bank=按【最小化总损血】排序（与烧血换属性方向相反）→ 重点看：")
+        print("     问题A(银行项解决):maxHP↑了吗?   问题B(真核心·不解决):maxATK 是否仍卡26/破红钥?")
+        print("   每 beam_k 跑两组对照：基线(hp−Φ) vs 银行(hp+bank−Φ)")
+
     for bk in beam_ks:
         print("\n" + "=" * 84)
         print(f"■ beam_k={bk}  max_states={args.max_states}  diversity={diversity}")
         print("=" * 84, flush=True)
-        res = run_one(start, REDKEY_CELL, allowed, bk, args.max_states, diversity, table)
-        print(f"\n  found={res.found}  耗时={res._secs:.1f}s  hit_cap={res.hit_cap}")
-        print(f"  distinct_fp={res.distinct_fingerprints}  expanded={res.states_expanded} "
-              f"generated={res.states_generated}  waves={res.n_waves}")
-        print(f"  goal_hits={res.goal_hits}  前沿={len(res.goal_frontier)}  "
-              f"beam_cut_total={res.beam_cut_total}  overflow_waves={res.beam_overflow_waves}")
-        print(f"  fp_by_floor={dict(res.fp_by_floor)}")
-        print("\n  ── 各层【到达过】最优属性（on_admit·看 beam 把队伍推到哪）──")
-        for f in sorted(res._best_by_floor, key=lambda x: int(x[2:])):
-            b = res._best_by_floor[f]
-            print(f"    {f:>5}: n={b['n']:>6}  maxATK={b['atk']}  maxDEF={b['def']}  "
-                  f"maxHP={b['hp']}  bestV={b['V']:>10.0f}")
-        if res.found:
-            print(f"\n  ★ 走到红钥！max-HP 出口 HP={res.final_hp}")
-            print("  ⟹ path-loss 引导让 9 层中段【可处理】→ 方向2 路通（量损待对照）。")
-            export_h5route(res, f"bk{bk}")
+        if potions is None:
+            res = run_one(start, REDKEY_CELL, allowed, bk, args.max_states, diversity, table)
+            report_res(res, bk, "基线 hp−Φ", f"bk{bk}")
         else:
-            mt8 = res._best_by_floor.get("MT8")
-            reach8 = f"到过 MT8(maxATK{mt8['atk']}/DEF{mt8['def']}/HP{mt8['hp']})" if mt8 else "没到过 MT8"
-            print(f"\n  ✗ 没走到红钥（{reach8}）。hit_cap={res.hit_cap}")
-            print("  ⟹ 看各层 maxATK 有没有从 §S40 卡的 24-25 往上攒（思路扭过来的直接信号）。")
-            export_halfway_h5route(res._best_acts, f"bk{bk}")
+            res0 = run_one(start, REDKEY_CELL, allowed, bk, args.max_states, diversity, table,
+                           potions=None)
+            report_res(res0, bk, "基线 hp−Φ", f"base_bk{bk}")
+            res1 = run_one(start, REDKEY_CELL, allowed, bk, args.max_states, diversity, table,
+                           potions=potions)
+            report_res(res1, bk, "银行 hp+bank−Φ", f"bank_bk{bk}")
 
 
 if __name__ == "__main__":
