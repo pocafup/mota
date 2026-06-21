@@ -317,6 +317,9 @@ def run_full(start, goal, allowed, beam_k, max_states, score_fn, diag, enable_fl
     # best_acts：导 h5route 用·记【最深态(max (atk,hp))】的动作串(沿用 dir2 半截导出约定·
     #   snap 是 (floor,x,y,atk,def,hp) 元组·export_halfway 读 snap[0..5])。
     best_acts = {"key": (-1, -1), "acts": None, "snap": None}
+    # §S56：score 最优锚点(字典序 key·与 best_acts 并存做 A/B)。验"屯血871"是不是
+    #   旧锚点 key=(atk,hp) 显式追血造成的导出口径假象——score 末键 hp−Φ+kc 非纯追血。
+    best_score = {"key": NEG, "acts": None, "snap": None}
 
     def on_admit(child, _acts):
         h = child.hero
@@ -337,6 +340,10 @@ def run_full(start, goal, allowed, beam_k, max_states, score_fn, diag, enable_fl
             best_acts["key"] = k
             best_acts["acts"] = _acts
             best_acts["snap"] = (child.current_floor, h.x, h.y, h.atk, h.def_, h.hp)
+        if v > best_score["key"]:                              # §S56：按 score(字典序)选锚点
+            best_score["key"] = v
+            best_score["acts"] = _acts
+            best_score["snap"] = (child.current_floor, h.x, h.y, h.atk, h.def_, h.hp)
 
     t0 = time.time()
     res = search_quotient(start, goal, seg_step, max_states=max_states,
@@ -349,6 +356,7 @@ def run_full(start, goal, allowed, beam_k, max_states, score_fn, diag, enable_fl
     res._best_by_floor = dict(best)
     res._top = top
     res._best_acts = best_acts
+    res._best_score = best_score
     return res
 
 
@@ -455,7 +463,11 @@ def main():
     if res.found:
         export_h5route(res, export_tag)
     else:
+        print("\n  [A] 旧锚点 max-(atk,hp)：")
         export_halfway_h5route(res._best_acts, export_tag)
+        if res._best_score.get("acts") is not None:                  # §S56 A/B：score 最优锚点(字典序)
+            print("\n  [B] 新锚点 score 最优(字典序·非追血)：")
+            export_halfway_h5route(res._best_score, export_tag + "_scoremax")
 
 
 if __name__ == "__main__":
