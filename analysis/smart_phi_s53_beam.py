@@ -30,6 +30,7 @@ cost-to-go 漏 boss + MT9/MT10 伏击(玩家钉死=价值跨边界病)。玩家 
         --out analysis/_s53_smartphi_k800.txt
 """
 import argparse
+import json
 import os
 import sys
 import time
@@ -61,6 +62,11 @@ from vzone import build_zone                                       # noqa: E402
 
 # ── 钥匙 HP 当量(源码坐实·shops.json·§S43)：1金=2血 / 黄=20 / 蓝=100 / 红=1600 ──
 KEY_HP = {"yellowKey": 20, "blueKey": 100, "redKey": 1600}
+
+# ── fly 魔杖跨层属性(canFlyTo/canFlyFrom·排 MT0/MT44/MT50)·enable_fly=True 时注入 search_quotient ──
+#    扩 beam 视野=飞回低层(如 MT1)拿漏拿资源。源码坐实·dir2_keyscarcity_beam 同款加载。
+FLY_ATTRS = json.loads(
+    (ROOT / "data" / "games51" / "fly_attrs.json").read_text(encoding="utf-8"))["floors"]
 
 # 一区 boss / 红钥门守卫 / MT10 红宝石(数据坐实·_s53_data_probe.py 校验)
 BOSS_ID = "skeletonCaptain"      # MT10(6,4)·红钥门后伏击·DEF27 下 ATK26→27 损血 342→304
@@ -299,7 +305,7 @@ def self_check(start, diag, score_fn):
 
 
 # ══════════════════════════ 全段 beam ══════════════════════════
-def run_full(start, goal, allowed, beam_k, max_states, score_fn, diag):
+def run_full(start, goal, allowed, beam_k, max_states, score_fn, diag, enable_fly=False):
     seg_step = make_seg_step(allowed)
     redgem_cell = REDGEM_CELL
     mon_cells = diag["mon_cells"]
@@ -336,7 +342,9 @@ def run_full(start, goal, allowed, beam_k, max_states, score_fn, diag):
     res = search_quotient(start, goal, seg_step, max_states=max_states,
                           cross_floor=True, beam_k=beam_k, distinguish_doors=True,
                           beam_score_fn=score_fn, beam_diversity="stairs",
-                          on_admit=on_admit)
+                          on_admit=on_admit,
+                          enable_fly=enable_fly,
+                          fly_attrs=FLY_ATTRS if enable_fly else None)
     res._secs = time.time() - t0
     res._best_by_floor = dict(best)
     res._top = top
@@ -350,6 +358,9 @@ def main():
     ap.add_argument("--max-states", type=int, default=1_800_000)
     ap.add_argument("--mult", type=float, default=1.0, help="钥匙 HP 当量乘子(§S43·玩家定 mult=1)")
     ap.add_argument("--nav-maxpops", type=int, default=12000)
+    ap.add_argument("--enable-fly", action="store_true",
+                    help="开 fly 魔杖跨层边(方案B保守子集·扩视野飞回低层拿漏拿资源·如 MT1)；"
+                         "默认关=老路指纹不变零回归")
     ap.add_argument("--phi-only", action="store_true",
                     help="只自检+小验证·不跑 beam(全段跑前必过)")
     ap.add_argument("--out", type=str, default="",
@@ -404,9 +415,11 @@ def main():
 
     # ── 全段 beam ──
     print("\n" + "=" * 84)
-    print(f"■ 全段 beam：beam_k={args.beam_k}  max_states={args.max_states}")
+    print(f"■ 全段 beam：beam_k={args.beam_k}  max_states={args.max_states}  "
+          f"fly={'★开(飞回低层拿漏拿资源·如MT1)' if args.enable_fly else '关(老路)'}")
     print("=" * 84, flush=True)
-    res = run_full(start, goal, floors, args.beam_k, args.max_states, score_fn, diag)
+    res = run_full(start, goal, floors, args.beam_k, args.max_states, score_fn, diag,
+                   enable_fly=args.enable_fly)
 
     print(f"\n found={res.found}  耗时={res._secs:.1f}s  hit_cap={res.hit_cap}")
     print(f" expanded={res.states_expanded} generated={res.states_generated} "
@@ -438,7 +451,7 @@ def main():
     print("=" * 84)
 
     # ── 导 h5route(给玩家网站回放)·复用 dir2 自检过的导出器(前缀 tokens[:455] + beam RULD + sim 独立重放自检)──
-    export_tag = f"s53_smartphi_k{args.beam_k}"
+    export_tag = f"s53_smartphi_k{args.beam_k}{'_fly' if args.enable_fly else ''}"
     if res.found:
         export_h5route(res, export_tag)
     else:
